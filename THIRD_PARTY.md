@@ -1,13 +1,12 @@
 # Third-party provenance
 
-## Airwindows EQ engines
+## Airwindows EQ and slew engines
 
 Source: https://github.com/airwindows/airwindows
 Commit: `7fd5f5cae262a41e6dd7d9a83d60c46e84d3092a` (retrieved 2026-11-06).
 The original `plugins/WinVST/` sources for PearLiteEQ, BezEQ3, FatEQ, SmoothEQ3,
-SmoothEQ2 and PearEQ (headers, wrappers and processing sources) are retained
-unchanged under
-`third_party/airwindows/`, together with the upstream MIT license.
+SmoothEQ2, PearEQ, EverySlew and Slew4 (headers, wrappers and processing sources)
+are retained unchanged under `third_party/airwindows/`, together with the upstream MIT license.
 Copyright Chris Johnson / Airwindows.
 
 The corresponding `Source/*Engine.*` files replace VST2 metadata
@@ -28,8 +27,11 @@ EQ, normalization, limiter or algorithm crossfade is inserted. FatEQ retains its
 original ClipOnly2 output stage and its measured one-sample
 small-signal latency at 44.1–192 kHz. The wrapper reports that latency and aligns
 dry A/B and host bypass by one sample, without delaying or changing the wet DSP.
-The other five algorithms have zero fixed latency. All original filter phase
-responses are intact. Existing PearLiteEQ/BezEQ3 engine files are unchanged.
+Slew4 retains its original two-sample lookahead and adaptive averaging; the
+wrapper reports the fixed two samples and aligns dry A/B and host bypass by two
+samples. EverySlew and the other five algorithms have zero fixed latency. All
+original filter and slew behavior is intact. The six previously integrated
+engine files are unchanged.
 
 ## Tape / ButterComp UI and utilities
 

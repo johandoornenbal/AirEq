@@ -6,6 +6,8 @@
 #include "../Source/SmoothEQ3Engine.h"
 #include "../Source/SmoothEQ2Engine.h"
 #include "../Source/PearEQEngine.h"
+#include "../Source/EverySlewEngine.h"
+#include "../Source/Slew4Engine.h"
 
 #include "../Source/OutputMeter.h"
 #include "../Source/MeterBallistics.h"
@@ -107,6 +109,7 @@ void trimChecks() {
         p->setProcessingPrecision(juce::AudioProcessor::doublePrecision); p->prepareToPlay(48000,256);
         PearLiteEQEngine pear; BezEQ3Engine bez;
         FatEQEngine fat; SmoothEQ3Engine smooth3; SmoothEQ2Engine smooth2; PearEQEngine fullPear;
+        EverySlewEngine every; Slew4Engine slew; every.reset(48000); slew.reset(48000);
         pear.reset(48000); bez.reset(48000); fat.reset(48000); smooth3.reset(48000); smooth2.reset(48000); fullPear.reset(48000);
         juce::AudioBuffer<double> audio(2,256),expected(2,256); juce::MidiBuffer midi;
         for(int i=0;i<256;++i) for(int c=0;c<2;++c) audio.setSample(c,i,.1*std::sin(i*.05*(c+1)));
@@ -118,6 +121,8 @@ void trimChecks() {
             case 3: smooth3.processDoubleReplacing(ptr,ptr,256); break;
             case 4: smooth2.processDoubleReplacing(ptr,ptr,256); break;
             case 5: fullPear.processDoubleReplacing(ptr,ptr,256); break;
+            case 6: every.processDoubleReplacing(ptr,ptr,256); break;
+            case 7: slew.processDoubleReplacing(ptr,ptr,256); break;
         }
         p->processBlock(audio,midi);
         for(int c=0;c<2;++c) for(int i=0;i<256;++i) require(std::abs(audio.getSample(c,i)-expected.getSample(c,i)*std::pow(10.,-6./20.))<1.e-12,"Output trim applied incorrectly");
@@ -126,14 +131,16 @@ void trimChecks() {
 }
 template<class T> void bypassChecks(juce::AudioProcessor& p,int model,double rate) {
     select(p,model); p.prepareToPlay(rate,37);
-    T previous[2]{};
+    std::array<std::array<T,2>,2> history{};
     juce::AudioBuffer<T> b(2,37); juce::MidiBuffer midi;
     for(int block=0;block<4;++block) {
-        for(int c=0;c<2;++c) for(int i=0;i<37;++i) b.setSample(c,i,static_cast<T>((block*37+i+1)*.001*(c+1)));
+        const auto frames=block%3==0?1:block%3==1?2:37; b.setSize(2,frames);
+        for(int c=0;c<2;++c) for(int i=0;i<frames;++i) b.setSample(c,i,static_cast<T>((block*37+i+1)*.001*(c+1)));
         juce::AudioBuffer<T> dry; dry.makeCopyOf(b); p.processBlockBypassed(b,midi);
-        for(int c=0;c<2;++c) {
-            for(int i=0;i<37;++i) require(b.getSample(c,i)==(controls::latency(model)?(i==0?previous[c]:dry.getSample(c,i-1)):dry.getSample(c,i)),"Host bypass latency is wrong");
-            previous[c]=dry.getSample(c,36);
+        const auto delay=controls::latency(model);
+        for(int i=0;i<frames;++i) {
+            for(int c=0;c<2;++c) require(b.getSample(c,i)==(delay?history[static_cast<size_t>(delay-1)][static_cast<size_t>(c)]:dry.getSample(c,i)),"Host bypass latency is wrong");
+            history[1]=history[0]; history[0]={dry.getSample(0,i),dry.getSample(1,i)};
         }
     }
     p.releaseResources();
@@ -154,13 +161,19 @@ int main() try {
     juce::ScopedJuceInitialiser_GUI init;
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     require(parameter(*p,"model").getValue()==0,"PearLiteEQ is not the default");
-    require(p->getParameters().size()==65,"Unexpected parameter layout");
+    require(p->getParameters().size()==80,"Unexpected parameter layout");
     juce::StringArray oldIds;
     for(int model:{0,1}) for(int i=0;i<controls::count(model);++i) oldIds.add(controls::id(model,i));
     oldIds.add("model");
     for(int model:{0,1}) oldIds.add(controls::linkId(model));
     for(int model:{0,1}) { oldIds.add(controls::matchId(model)); oldIds.add(controls::originalId(model)); }
     for(int model:{0,1}) { oldIds.add(controls::inputId(model)); oldIds.add(controls::outputId(model)); }
+    for(int model=2;model<6;++model) {
+        for(int i=0;i<controls::count(model);++i) oldIds.add(controls::id(model,i));
+        oldIds.add(controls::linkId(model)); oldIds.add(controls::matchId(model)); oldIds.add(controls::originalId(model));
+        oldIds.add(controls::inputId(model)); oldIds.add(controls::outputId(model));
+    }
+    require(oldIds.size()==65,"Old parameter fixture is incomplete");
     for(int i=0;i<oldIds.size();++i) require(dynamic_cast<juce::RangedAudioParameter*>(p->getParameters()[i])->paramID==oldIds[i],"Original parameter order changed");
     for(double rate:{44100.,48000.,96000.,192000.}) {
         for(int model=0;model<controls::modelCount;++model) { bypassChecks<float>(*p,model,rate); bypassChecks<double>(*p,model,rate); }
@@ -170,11 +183,13 @@ int main() try {
         compare<SmoothEQ3Engine,float>(*p,3,rate); compare<SmoothEQ3Engine,double>(*p,3,rate);
         compare<SmoothEQ2Engine,float>(*p,4,rate); compare<SmoothEQ2Engine,double>(*p,4,rate);
         compare<PearEQEngine,float>(*p,5,rate); compare<PearEQEngine,double>(*p,5,rate);
+        compare<EverySlewEngine,float>(*p,6,rate); compare<EverySlewEngine,double>(*p,6,rate);
+        compare<Slew4Engine,float>(*p,7,rate); compare<Slew4Engine,double>(*p,7,rate);
 
     }
     meterChecks(); trimChecks();
     UI ui(*p);
-    for(int model:{0,1,2,3,4,5,0}) {
+    for(int model:{0,1,2,3,4,5,6,7,0}) {
         ui.selectModel(model);
         require(close(parameter(*p,"model").convertFrom0to1(parameter(*p,"model").getValue()),model),"Selector not bound");
         int visible=0;

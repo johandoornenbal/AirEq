@@ -6,6 +6,8 @@
 #include "../Source/SmoothEQ3Engine.h"
 #include "../Source/SmoothEQ2Engine.h"
 #include "../Source/PearEQEngine.h"
+#include "../Source/EverySlewEngine.h"
+#include "../Source/Slew4Engine.h"
 
 #include "../Source/LoudnessMatch.h"
 #include <iostream>
@@ -120,14 +122,16 @@ template<class T> void original(juce::AudioProcessor& p,int model) {
     p.prepareToPlay(48000,37);
     juce::AudioBuffer<T> b(2,37); juce::MidiBuffer midi;
 
-    T previous[2]{};
+    std::array<std::array<T,2>,2> history{};
     for(int block=0;block<8;++block) {
-        for(int c=0;c<2;++c) for(int i=0;i<37;++i) b.setSample(c,i,static_cast<T>(.15*std::sin((block*37+i)*.07*(c+1))));
+        const auto frames=block%3==0?1:block%3==1?2:37; b.setSize(2,frames);
+        for(int c=0;c<2;++c) for(int i=0;i<frames;++i) b.setSample(c,i,static_cast<T>(.15*std::sin((block*37+i)*.07*(c+1))));
         juce::AudioBuffer<T> dry; dry.makeCopyOf(b);
         p.processBlock(b,midi);
-        for(int c=0;c<2;++c) {
-            for(int i=0;i<37;++i) check(b.getSample(c,i)==(controls::latency(model)?(i==0?previous[c]:dry.getSample(c,i-1)):dry.getSample(c,i)),"Original A/B delay is wrong");
-            previous[c]=dry.getSample(c,36);
+        const auto delay=controls::latency(model);
+        for(int i=0;i<frames;++i) {
+            for(int c=0;c<2;++c) check(b.getSample(c,i)==(delay?history[static_cast<size_t>(delay-1)][static_cast<size_t>(c)]:dry.getSample(c,i)),"Original A/B delay is wrong");
+            history[1]=history[0]; history[0]={dry.getSample(0,i),dry.getSample(1,i)};
         }
     }
     p.releaseResources();
@@ -145,6 +149,8 @@ int main() try {
     learn<SmoothEQ3Engine>(*p,ui,3);
     learn<SmoothEQ2Engine>(*p,ui,4);
     learn<PearEQEngine>(*p,ui,5);
+    learn<EverySlewEngine>(*p,ui,6);
+    learn<Slew4Engine>(*p,ui,7);
 
     in.setValueNotifyingHost(in.getDefaultValue()); out.setValueNotifyingHost(out.getDefaultValue());
     const auto learned=snapshot(*p);
@@ -164,6 +170,8 @@ int main() try {
     verifyAppliedAfterSwitch<SmoothEQ3Engine>(*p,3);
     verifyAppliedAfterSwitch<SmoothEQ2Engine>(*p,4);
     verifyAppliedAfterSwitch<PearEQEngine>(*p,5);
+    verifyAppliedAfterSwitch<EverySlewEngine>(*p,6);
+    verifyAppliedAfterSwitch<Slew4Engine>(*p,7);
 
     p->releaseResources();
     for(int model=0;model<controls::modelCount;++model) { original<float>(*p,model); original<double>(*p,model); }
@@ -171,7 +179,7 @@ int main() try {
         param(*p,controls::originalId(model)).setValueNotifyingHost(model%2?1.f:0.f);
         param(*p,controls::matchId(model)).setValueNotifyingHost(model%2?0.f:1.f);
     }
-    for(int model:{0,1,2,3,4,5,0,1}) {
+    for(int model:{0,1,2,3,4,5,6,7,0,1}) {
         ui.select(model);
         check(dynamic_cast<juce::TextButton&>(ui.component("matchEnabled")).getToggleState()==(model%2==0),"Model match enable not recalled");
         check(dynamic_cast<juce::TextButton&>(ui.component("abOriginal")).getToggleState()==(model%2==1),"Model A/B not recalled");
@@ -185,6 +193,23 @@ int main() try {
         check(static_cast<bool>(recalled.getProperty(key(model,"hasMatch"))),"Session lost learned flag");
         check(param(*restored,controls::originalId(model)).getValue()==param(*p,controls::originalId(model)).getValue(),"Session lost A/B");
         check(param(*restored,controls::matchId(model)).getValue()==param(*p,controls::matchId(model)).getValue(),"Session lost match enable");
+    }
+    auto previous=learned.createCopy();
+    for(int i=previous.getNumChildren();--i>=0;) {
+        const auto id=previous.getChild(i).getProperty("id").toString();
+        if(id.startsWith("everyslew_") || id.startsWith("slew4_")) previous.removeChild(i,nullptr);
+    }
+    for(int model=6;model<controls::modelCount;++model) for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) previous.removeProperty(key(model,property),nullptr);
+    previous.getChildWithProperty("id","model").setProperty("value",5,nullptr);
+    restore(*restored,previous);
+    check(std::abs(param(*restored,"model").convertFrom0to1(param(*restored,"model").getValue())-5.f)<1.e-6,"Old six-model session lost PearEQ selection");
+    for(int model=0;model<6;++model) {
+        for(int i=0;i<controls::count(model);++i) check(param(*restored,controls::id(model,i)).getValue()==param(*p,controls::id(model,i)).getValue(),"Six-model session lost controls");
+        check(snapshot(*restored).getProperty(key(model,"matchDb"))==learned.getProperty(key(model,"matchDb")),"Six-model session lost learned match");
+    }
+    for(int model=6;model<controls::modelCount;++model) {
+        for(int i=0;i<controls::count(model);++i) check(std::abs(param(*restored,controls::id(model,i)).getValue()-controls::defaultValue(model,i))<1.e-6,"Six-model session lost slew defaults");
+        check(!static_cast<bool>(snapshot(*restored).getProperty(key(model,"hasMatch"))),"Six-model session invented slew match");
     }
     auto old=learned.createCopy();
     for(int i=old.getNumChildren();--i>=0;) {
@@ -202,6 +227,13 @@ int main() try {
         for(int i=0;i<controls::count(model);++i) check(param(*restored,controls::id(model,i)).getValue()==param(*p,controls::id(model,i)).getValue(),"Old session lost original tone controls");
     }
     for(int model=2;model<controls::modelCount;++model) check(!static_cast<bool>(snapshot(*restored).getProperty(key(model,"hasMatch"))),"Old session invented a new learned match");
+    // Reset the new EverySlew bank without clearing Slew4 or changing its original controls.
+    ui.select(6);
+    const auto slewValue=param(*p,controls::id(6,0)).getValue();
+    ui.click("resetMatch");
+    const auto slewReset=snapshot(*p);
+    check(!static_cast<bool>(slewReset.getProperty(key(6,"hasMatch"))) && static_cast<bool>(slewReset.getProperty(key(7,"hasMatch"))),"Slew reset crossed model banks");
+    check(param(*p,controls::id(6,0)).getValue()==slewValue,"Slew reset changed original controls");
     ui.select(1); const auto tone=param(*p,controls::id(1,2)).getValue();
     ui.click("resetMatch"); auto reset=snapshot(*p);
     check(!static_cast<bool>(reset.getProperty(key(1,"hasMatch"))) && static_cast<bool>(reset.getProperty(key(0,"hasMatch"))),"Reset did not isolate one bank");

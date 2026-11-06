@@ -8,6 +8,8 @@
 #include "SmoothEQ3Engine.h"
 #include "SmoothEQ2Engine.h"
 #include "PearEQEngine.h"
+#include "EverySlewEngine.h"
+#include "Slew4Engine.h"
 
 #include "OutputMeter.h"
 #include "MeterBallistics.h"
@@ -71,8 +73,8 @@ public:
     int selectedModel() const { return juce::jlimit(0,controls::modelCount-1,juce::roundToInt(modelValue->load())); }
     void prepareToPlay(double rate,int maximumBlockSize) override {
         sampleRate=rate; engine.reset(rate); engine1.reset(rate);
-        engine2.reset(rate); engine3.reset(rate); engine4.reset(rate); engine5.reset(rate);
-        lastDryL=lastDryR=0;
+        engine2.reset(rate); engine3.reset(rate); engine4.reset(rate); engine5.reset(rate); engine6.reset(rate); engine7.reset(rate);
+        dryHistory={};
         activeModel=selectedModel(); setLatencySamples(controls::latency(activeModel)); peaks[0]=0; peaks[1]=0;
         meterTimeoutSeconds.store(juce::jmax(.15,2.0*maximumBlockSize/rate),std::memory_order_relaxed);
         meterSequence.fetch_add(1,std::memory_order_release);
@@ -112,10 +114,9 @@ public:
                     loudness.sample(dryL[dryIndex],dryR[dryIndex],left[i],right[i]);
                     if(loudness.complete()) { finishLearn(); gainSmooth.setTargetValue(targetGain(model)); }
                 }
-                // FatEQ retains the original one-sample ClipOnly2 delay. Align only dry A/B.
-                const auto alignedL=model==2?lastDryL:static_cast<double>(dryL[dryIndex]);
-                const auto alignedR=model==2?lastDryR:static_cast<double>(dryR[dryIndex]);
-                lastDryL=dryL[dryIndex]; lastDryR=dryR[dryIndex];
+                // Align dry A/B to the original fixed delay, leaving the wet DSP untouched.
+                const auto aligned=alignedDry(dryL[dryIndex],dryR[dryIndex],controls::latency(model));
+                const auto alignedL=aligned[0],alignedR=aligned[1];
                 const auto gain=gainSmooth.getNextValue(),blend=blendSmooth.getNextValue();
                 if(blend<=0) { left[i]=static_cast<T>(alignedL); right[i]=static_cast<T>(alignedR); }
                 else if(blend>=1) {
@@ -146,6 +147,8 @@ public:
             case 3: render(engine3,b,model); break;
             case 4: render(engine4,b,model); break;
             case 5: render(engine5,b,model); break;
+            case 6: render(engine6,b,model); break;
+            case 7: render(engine7,b,model); break;
             default: break;
         }
         publishMeters(b);
@@ -165,11 +168,11 @@ public:
         handleCommand(selectedModel());
         if(b.getNumChannels()>=2 && b.getNumSamples()>0) {
             // Host bypass must retain the same fixed latency as the active engine.
-            if(selectedModel()==2) for(int i=0;i<b.getNumSamples();++i) {
-                const auto l=b.getSample(0,i),r=b.getSample(1,i);
-                b.setSample(0,i,static_cast<T>(lastDryL)); b.setSample(1,i,static_cast<T>(lastDryR));
-                lastDryL=l; lastDryR=r;
-            } else { lastDryL=b.getSample(0,b.getNumSamples()-1); lastDryR=b.getSample(1,b.getNumSamples()-1); }
+            const auto delay=controls::latency(selectedModel());
+            for(int i=0;i<b.getNumSamples();++i) {
+                const auto dry=alignedDry(b.getSample(0,i),b.getSample(1,i),delay);
+                b.setSample(0,i,static_cast<T>(dry[0])); b.setSample(1,i,static_cast<T>(dry[1]));
+            }
             publishMeters(b);
         }
     }
@@ -262,6 +265,8 @@ private:
                 case 3: engine3.reset(sampleRate); break;
                 case 4: engine4.reset(sampleRate); break;
                 case 5: engine5.reset(sampleRate); break;
+                case 6: engine6.reset(sampleRate); break;
+                case 7: engine7.reset(sampleRate); break;
                 default: break;
             }
             setLatencySamples(controls::latency(model));
@@ -310,7 +315,16 @@ private:
     SmoothEQ3Engine engine3;
     SmoothEQ2Engine engine4;
     PearEQEngine engine5;
-    double lastDryL=0,lastDryR=0;
+    EverySlewEngine engine6;
+    Slew4Engine engine7;
+    // [0] is the previous input sample; [1] is two samples back.
+    std::array<std::array<double,2>,2> dryHistory{};
+    std::array<double,2> alignedDry(double left,double right,int delay) {
+        const std::array<double,2> current{left,right};
+        const auto result=delay>0?dryHistory[static_cast<size_t>(delay-1)]:current;
+        dryHistory[1]=dryHistory[0]; dryHistory[0]=current;
+        return result;
+    }
     std::array<std::array<std::atomic<float>*,8>,controls::modelCount> values{};
     std::atomic<float>* modelValue=nullptr;
     juce::ValueTree defaults;
@@ -391,7 +405,7 @@ public:
         learnButton.setTooltip("Learn a fixed LUFS level match for the selected model from up to 15 seconds of audible audio. Finish after at least 3 seconds.");
         resetMatchButton.setTooltip("Clear only this model's learned adjustment. EQ controls, trims, linking and A/B remain as set.");
         enableMatchButton.setTooltip("Enable or disable this model's saved level match.");
-        originalButton.setTooltip("Compare original input with the processed path, using a short crossfade. FatEQ Original is aligned to its original one-sample ClipOnly2 delay.");
+        originalButton.setTooltip("Compare original input with the processed path, using a short crossfade. Original is aligned to FatEQ's one-sample delay or Slew4's two-sample lookahead.");
         addAndMakeVisible(matchReadout); addAndMakeVisible(matchStatus);
         matchReadout.setComponentID("matchReadout"); matchStatus.setComponentID("matchStatus");
         matchReadout.setColour(juce::Label::textColourId,style::gold);
@@ -399,7 +413,7 @@ public:
         matchStatus.setColour(juce::Label::textColourId,style::cream.withAlpha(.7f));
         matchStatus.setFont(juce::FontOptions(11.f));
         selector.setName("EQ model");
-        selector.setTooltip("Choose an original Airwindows EQ algorithm. Each model retains its own controls and loudness match.");
+        selector.setTooltip("Choose an original Airwindows EQ or slew algorithm. Each model retains its own controls and loudness match.");
         selector.addItemList(controls::choices(),1);
         selector.setColour(juce::ComboBox::backgroundColourId,style::ink);
         selector.setColour(juce::ComboBox::textColourId,style::gold);
@@ -488,7 +502,7 @@ public:
         g.setColour(gold); g.setFont(juce::FontOptions(13.f));
         g.drawText(controls::modelName(shownModel),426,158,128,22,juce::Justification::centred);
         g.setFont(juce::FontOptions(36.f));
-        g.drawText("EQ",426,193,128,54,juce::Justification::centred);
+        g.drawText(shownModel>=6?"SLEW":"EQ",426,193,128,54,juce::Justification::centred);
         g.setColour(muted); g.setFont(juce::FontOptions(10.f));
         g.drawText("STEREO",426,256,128,18,juce::Justification::centred);
         g.drawText("SAMPLE PEAK",426,275,128,18,juce::Justification::centred);
@@ -512,8 +526,12 @@ public:
             g.setColour(gold); g.setFont(juce::FontOptions(16.f));
             g.drawText(controls::description(shownModel),100,580,780,28,juce::Justification::centred);
             g.setColour(cream.withAlpha(.65f)); g.setFont(juce::FontOptions(13.f));
-            g.drawText("Fixed crossover network. Original Airwindows tone.",100,615,780,24,juce::Justification::centred);
-            g.drawText(shownModel==2?"Tone defaults: 50%  /  EQ output: 100%  /  Original ClipOnly2 retained":
+            g.drawText(shownModel==6?"Original multistage limiting with halo and inverse/dry/wet blend.":
+                shownModel==7?"Original adaptive averaging and two-sample lookahead.":
+                "Fixed crossover network. Original Airwindows tone.",100,615,780,24,juce::Justification::centred);
+            g.drawText(shownModel==6?"Defaults: Slew 0%  /  Depth 100%  /  Halo 16%  /  Inv/Wet 100%":
+                shownModel==7?"Slew default: 50%  /  Double-click to reset  /  Type values below the dial":
+                shownModel==2?"Tone defaults: 50%  /  EQ output: 100%  /  Original ClipOnly2 retained":
                 "50% is neutral  /  Double-click to reset  /  Type values below each dial",100,647,780,24,juce::Justification::centred);
         }
         g.setColour(ink.withAlpha(.65f)); g.setFont(juce::FontOptions(11.f));

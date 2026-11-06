@@ -1,13 +1,15 @@
 # AirEq Studio
 
-A native studio UI for **Airwindows PearLiteEQ, BezEQ3, FatEQ, SmoothEQ3, SmoothEQ2 and PearEQ**, using the cream,
+A native studio UI for **Airwindows PearLiteEQ, BezEQ3, FatEQ, SmoothEQ3,
+SmoothEQ2, PearEQ, EverySlew and Slew4**, using the cream,
 charcoal and brass style of [ToTape Studio](https://github.com/johandoornenbal/tape).
 **PearLiteEQ is the default.** Built with JUCE as a **VST3 for Apple Silicon Macs
 (M2 and later)**, macOS 11+. Independent adaptation; original DSP by Chris Johnson / Airwindows.
 
 ![PearLiteEQ editor](docs/ui-pearliteeq.png)
 
-Choose the EQ from the top selector. Each has its own automatable parameter bank,
+Choose the EQ or slew processor from the top selector. Each has its own
+automatable parameter bank,
 input/output trims, gain link, learned LUFS adjustment, Match ON/OFF and
 Original/Processed setting. Switching retains each model's settings; the DAW
 session saves them all. The selected model takes effect at the next audio block.
@@ -27,6 +29,8 @@ The controls follow each original plugin, displayed from low to high bands:
 | SmoothEQ3 | Bass, Mid, High | 50% |
 | SmoothEQ2 | Four band levels and four frequency controls | 50% |
 | PearEQ | Sub, Bass, Low mid, Mid, High mid, High | 50% |
+| EverySlew | Slew, Depth, Halo, Inv/Wet | 0%, 100%, 16%, 100% |
+| Slew4 | Slew | 50% |
 
 PearLiteEQ, FatEQ, SmoothEQ3 and PearEQ retain their fixed crossovers.
 BezEQ3 and SmoothEQ2 show the four original frequency controls below the gains.
@@ -37,13 +41,21 @@ original normalized mappings, including interactions and sample-rate dependence;
 they are deliberately shown as percentages, not invented Hz values. These are
 not conventional independent parametric bands.
 
+EverySlew and Slew4 are the original slew processors, with their original
+normalized controls. EverySlew's Inv/Wet control retains the inverse/dry/wet
+mapping: 0% subtracts the processed signal from the input, 50% is dry, and 100%
+is fully processed. Depth retains its original stepped stage selection. Slew4
+retains adaptive averaging and its two-sample lookahead; 0% removes averaging
+while keeping that lookahead. Slew4's 50% default is not a neutral EQ setting.
+
 ![BezEQ3 editor](docs/ui-bezeq3.png)
 
 [FatEQ](docs/ui-fateq.png) · [SmoothEQ3](docs/ui-smootheq3.png) ·
-[SmoothEQ2](docs/ui-smootheq2.png) · [PearEQ](docs/ui-peareq.png)
+[SmoothEQ2](docs/ui-smootheq2.png) · [PearEQ](docs/ui-peareq.png) ·
+[EverySlew](docs/ui-everyslew.png) · [Slew4](docs/ui-slew4.png)
 
 Double-click a knob to reset it, or type a value below it. **Reset to Default**
-resets only the selected EQ's tone/frequency controls and input/output trims.
+resets only the selected model's original controls and input/output trims.
 It preserves linking, learned matching, Match ON/OFF, A/B, and the other EQ.
 Relearn matching after changing the EQ or trims.
 
@@ -65,8 +77,10 @@ The illuminated stereo output meters show the final audible sample peaks, after
 trims, matching and A/B, with 120 ms attack and 450 ms release damping and a
 −60 dBFS floor. They are sample-peak displays, not VU, loudness or true-peak meters.
 Stereo input/output; float and double processing. FatEQ retains its original
-one-sample ClipOnly2 delay and reports that latency to the host. The other models
-report zero fixed latency.
+one-sample ClipOnly2 delay; Slew4 retains two-sample lookahead. Both delays are
+reported to the host. The other models report zero fixed latency. Slew4 also
+retains its original signal-dependent averaging response; that is part of its
+processing, not an extra fixed wrapper delay.
 
 ## LUFS comparison and level matching
 
@@ -86,7 +100,10 @@ can exceed available headroom. Relearn after changing the source or EQ settings.
 - **Match ON/OFF** applies or disables the selected EQ's saved adjustment.
 - **A: Original / B: Processed** compares untouched input with the EQ path including
   trims and enabled matching, using a 5 ms crossfade. The EQ keeps processing while
-  Original is selected. FatEQ Original and host bypass receive one sample of delay to align with its original output stage. The other models need no extra fixed delay for comparison.
+  Original is selected. FatEQ Original and host bypass receive one sample of
+  delay; Slew4 receives two,
+  aligning with their original fixed delays. The other models need no extra
+  fixed delay for comparison.
 - **Reset Match** clears only the selected EQ's learned result; all EQ parameters,
   trims, linking, Match ON/OFF and A/B preferences remain as set.
 
@@ -95,15 +112,15 @@ Host bypass pauses measurement. Silent, short or failed measurements preserve th
 last successful result. New instances have no learned adjustment and open on
 Processed. Matching defaults enabled but applies unity until a match is learned.
 
-## Sessions from v0.1
+## Existing sessions
 
-The original 23 host parameter IDs and indices are preserved. Existing saved
-PearLiteEQ/BezEQ3 settings, selected model and learned matches are retained; the
-new banks receive the upstream defaults. The model selector now has six choices,
-so existing host automation for that selector may need updating to its expanded
-range. Other automation parameters keep their original ranges and indices.
-Switch algorithms with playback stopped so the host can update FatEQ's one-sample
-latency compensation.
+All 65 host parameter IDs and indices from the six-model v0.2 release are
+preserved, including the original 23 from v0.1. Existing model selection,
+controls, trims and learned matches are retained; the new banks receive the
+upstream defaults. The selector now has eight choices, so existing host
+automation for that selector may need updating to its expanded range. Other
+parameters keep their original ranges and indices. Switch algorithms with
+playback stopped so the host can update FatEQ/Slew4 latency compensation.
 
 ## Build, sign and install on your Mac
 
@@ -162,13 +179,13 @@ are for development validation; releases target Apple Silicon Macs.
 Upstream comparison tests cover both precisions, silence, extremes, sample rates
 44.1–192 kHz, parameter changes and variable block sizes with matched noise seeds.
 Loudness tests compare the analyser with independent libebur128 results.
-Wrapper tests cover default model, routing, model-specific latency, all six
+Wrapper tests cover default model, routing, model-specific latency, all eight
 model banks, typed/reset
 controls, trim linking and host gestures, session/size recall, metering and actual
 editor rendering. Matching tests exercise learning, automatic completion,
 compensation placement, relearning, exact dry A/B, model isolation, session recall,
 reset, cancellation, bypass and silent input. Editor checks write preview PNGs
-for all six models in all three sizes to the build directory.
+for all eight models in all three sizes to the build directory.
 
 ## Licenses
 
@@ -178,11 +195,11 @@ See [THIRD_PARTY.md](THIRD_PARTY.md) for source pins and attribution.
 
 ## Validation in this development instance
 
-Linux Release VST3 compilation passed, with all nine CTest suites passing.
-All six EQ engines passed 96 exact upstream comparisons each (576 total, maximum
+Linux Release VST3 compilation passed, with all eleven CTest suites passing.
+All eight engines passed 96 exact upstream comparisons each (768 total, maximum
 absolute error 0). LUFS analysis matched independent libebur128 results at
-44.1/48/96/192 kHz. All six editors rendered at all three sizes; the images above
-come from the actual plugin editor at neutral settings.
+44.1/48/96/192 kHz. All eight editors rendered at all three sizes; the images above
+come from the actual plugin editor at the upstream default settings.
 
 The unchanged Mac installer previously passed shell syntax checks and simulated
 success, signature
