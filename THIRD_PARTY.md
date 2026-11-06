@@ -1,15 +1,16 @@
 # Third-party provenance
 
-## Airwindows PearLiteEQ and BezEQ3
+## Airwindows EQ engines
 
 Source: https://github.com/airwindows/airwindows
 Commit: `7fd5f5cae262a41e6dd7d9a83d60c46e84d3092a` (retrieved 2026-11-06).
-The original `plugins/WinVST/PearLiteEQ/` and `plugins/WinVST/BezEQ3/`
-headers, wrappers and processing sources are retained unchanged under
+The original `plugins/WinVST/` sources for PearLiteEQ, BezEQ3, FatEQ, SmoothEQ3,
+SmoothEQ2 and PearEQ (headers, wrappers and processing sources) are retained
+unchanged under
 `third_party/airwindows/`, together with the upstream MIT license.
 Copyright Chris Johnson / Airwindows.
 
-`Source/PearLiteEQEngine.*` and `Source/BezEQ3Engine.*` replace VST2 metadata
+The corresponding `Source/*Engine.*` files replace VST2 metadata
 and state management with small standalone engines. The float/double processing
 bodies are unchanged apart from method signatures. Initialization is exposed as
 `reset(sampleRate)`, normalized parameter setters clamp to 0–1, and noise seeds
@@ -23,8 +24,12 @@ Matched initial seeds allow exact sample comparisons against the adapted engines
 Input/output trims, gain linking, LUFS matching and Original/Processed comparison
 are separate wrapper features. At unity trims with no learned match and Processed
 selected, the wrapper returns the selected original engine output. No additional
-EQ, normalization, limiter or algorithm crossfade is inserted. Both algorithms
-have zero fixed plugin latency, with their original filter phase response intact.
+EQ, normalization, limiter or algorithm crossfade is inserted. FatEQ retains its
+original ClipOnly2 output stage and its measured one-sample
+small-signal latency at 44.1–192 kHz. The wrapper reports that latency and aligns
+dry A/B and host bypass by one sample, without delaying or changing the wet DSP.
+The other five algorithms have zero fixed latency. All original filter phase
+responses are intact. Existing PearLiteEQ/BezEQ3 engine files are unchanged.
 
 ## Tape / ButterComp UI and utilities
 

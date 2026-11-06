@@ -2,6 +2,11 @@
 #include "../Source/EQControls.h"
 #include "../Source/PearLiteEQEngine.h"
 #include "../Source/BezEQ3Engine.h"
+#include "../Source/FatEQEngine.h"
+#include "../Source/SmoothEQ3Engine.h"
+#include "../Source/SmoothEQ2Engine.h"
+#include "../Source/PearEQEngine.h"
+
 #include "../Source/LoudnessMatch.h"
 #include <iostream>
 #include <stdexcept>
@@ -90,7 +95,7 @@ template<class Engine> void learn(juce::AudioProcessor& p,UI& ui,int model) {
     p.releaseResources();
 }
 template<class Engine> void verifyAppliedAfterSwitch(juce::AudioProcessor& p,int model) {
-    param(p,"model").setValueNotifyingHost(static_cast<float>(model));
+    param(p,"model").setValueNotifyingHost(param(p,"model").convertTo0to1(static_cast<float>(model)));
     Engine reference; reference.reset(48000);
     for(int i=0;i<controls::count(model);++i) reference.setParameter(i,param(p,controls::id(model,i)).getValue());
     juce::AudioBuffer<double> b(2,256),wet(2,256); juce::MidiBuffer midi;
@@ -106,20 +111,23 @@ template<class Engine> void verifyAppliedAfterSwitch(juce::AudioProcessor& p,int
         if(block==7) for(int c=0;c<2;++c) for(int i=0;i<256;++i)
             check(std::abs(b.getSample(c,i)-wet.getSample(c,i)*gain)<1.e-12,"Model switch did not apply that model's learned adjustment/enable setting");
     }
+    check(p.getLatencySamples()==controls::latency(model),"Model switch did not update host latency");
 }
 template<class T> void original(juce::AudioProcessor& p,int model) {
-    param(p,"model").setValueNotifyingHost(static_cast<float>(model));
+    param(p,"model").setValueNotifyingHost(param(p,"model").convertTo0to1(static_cast<float>(model)));
     param(p,controls::originalId(model)).setValueNotifyingHost(1);
     p.setProcessingPrecision(std::is_same_v<T,float>?juce::AudioProcessor::singlePrecision:juce::AudioProcessor::doublePrecision);
     p.prepareToPlay(48000,37);
     juce::AudioBuffer<T> b(2,37); juce::MidiBuffer midi;
 
+    T previous[2]{};
     for(int block=0;block<8;++block) {
         for(int c=0;c<2;++c) for(int i=0;i<37;++i) b.setSample(c,i,static_cast<T>(.15*std::sin((block*37+i)*.07*(c+1))));
         juce::AudioBuffer<T> dry; dry.makeCopyOf(b);
         p.processBlock(b,midi);
         for(int c=0;c<2;++c) {
-            for(int i=0;i<37;++i) check(b.getSample(c,i)==dry.getSample(c,i),"Original A/B is not exact dry input");
+            for(int i=0;i<37;++i) check(b.getSample(c,i)==(controls::latency(model)?(i==0?previous[c]:dry.getSample(c,i-1)):dry.getSample(c,i)),"Original A/B delay is wrong");
+            previous[c]=dry.getSample(c,36);
         }
     }
     p.releaseResources();
@@ -132,6 +140,12 @@ int main() try {
     auto& in=param(*p,controls::inputId(0)); auto& out=param(*p,controls::outputId(0));
     in.setValueNotifyingHost(in.convertTo0to1(3)); out.setValueNotifyingHost(out.convertTo0to1(-2));
     learn<PearLiteEQEngine>(*p,ui,0); learn<BezEQ3Engine>(*p,ui,1);
+    for(int model=2;model<controls::modelCount;++model) param(*p,controls::id(model,0)).setValueNotifyingHost(.7f);
+    learn<FatEQEngine>(*p,ui,2);
+    learn<SmoothEQ3Engine>(*p,ui,3);
+    learn<SmoothEQ2Engine>(*p,ui,4);
+    learn<PearEQEngine>(*p,ui,5);
+
     in.setValueNotifyingHost(in.getDefaultValue()); out.setValueNotifyingHost(out.getDefaultValue());
     const auto learned=snapshot(*p);
     const double db0=learned.getProperty(key(0,"matchDb")),db1=learned.getProperty(key(1,"matchDb"));
@@ -146,25 +160,48 @@ int main() try {
     param(*p,controls::matchId(1)).setValueNotifyingHost(0);
     ui.select(0); p->prepareToPlay(48000,256);
     verifyAppliedAfterSwitch<BezEQ3Engine>(*p,1); verifyAppliedAfterSwitch<PearLiteEQEngine>(*p,0);
+    verifyAppliedAfterSwitch<FatEQEngine>(*p,2);
+    verifyAppliedAfterSwitch<SmoothEQ3Engine>(*p,3);
+    verifyAppliedAfterSwitch<SmoothEQ2Engine>(*p,4);
+    verifyAppliedAfterSwitch<PearEQEngine>(*p,5);
+
     p->releaseResources();
-    for(int model:{0,1}) { original<float>(*p,model); original<double>(*p,model); }
-    param(*p,controls::originalId(0)).setValueNotifyingHost(0);
-    param(*p,controls::originalId(1)).setValueNotifyingHost(1);
-    for(int model:{0,1,0,1}) {
+    for(int model=0;model<controls::modelCount;++model) { original<float>(*p,model); original<double>(*p,model); }
+    for(int model=0;model<controls::modelCount;++model) {
+        param(*p,controls::originalId(model)).setValueNotifyingHost(model%2?1.f:0.f);
+        param(*p,controls::matchId(model)).setValueNotifyingHost(model%2?0.f:1.f);
+    }
+    for(int model:{0,1,2,3,4,5,0,1}) {
         ui.select(model);
-        check(dynamic_cast<juce::TextButton&>(ui.component("matchEnabled")).getToggleState()==(model==0),"Model match enable not recalled");
-        check(dynamic_cast<juce::TextButton&>(ui.component("abOriginal")).getToggleState()==(model==1),"Model A/B not recalled");
+        check(dynamic_cast<juce::TextButton&>(ui.component("matchEnabled")).getToggleState()==(model%2==0),"Model match enable not recalled");
+        check(dynamic_cast<juce::TextButton&>(ui.component("abOriginal")).getToggleState()==(model%2==1),"Model A/B not recalled");
     }
     juce::MemoryBlock bytes; p->getStateInformation(bytes);
     std::unique_ptr<juce::AudioProcessor> restored(createPluginFilter());
     restored->setStateInformation(bytes.getData(),static_cast<int>(bytes.getSize()));
-    for(int model:{0,1}) {
+    for(int model=0;model<controls::modelCount;++model) {
         const auto recalled=snapshot(*restored);
         check(recalled.getProperty(key(model,"matchDb"))==learned.getProperty(key(model,"matchDb")),"Session lost a learned trim");
         check(static_cast<bool>(recalled.getProperty(key(model,"hasMatch"))),"Session lost learned flag");
         check(param(*restored,controls::originalId(model)).getValue()==param(*p,controls::originalId(model)).getValue(),"Session lost A/B");
         check(param(*restored,controls::matchId(model)).getValue()==param(*p,controls::matchId(model)).getValue(),"Session lost match enable");
     }
+    auto old=learned.createCopy();
+    for(int i=old.getNumChildren();--i>=0;) {
+        const auto id=old.getChild(i).getProperty("id").toString();
+        if(id!="model" && !id.startsWith("pear_") && !id.startsWith("bez_")) old.removeChild(i,nullptr);
+    }
+    for(int model=2;model<controls::modelCount;++model) for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) old.removeProperty(key(model,property),nullptr);
+    old.getChildWithProperty("id","model").setProperty("value",1,nullptr);
+    restore(*restored,old);
+    check(param(*restored,"model").convertFrom0to1(param(*restored,"model").getValue())==1,"Old BezEQ3 session selected another model");
+    for(int model=2;model<controls::modelCount;++model) for(int i=0;i<controls::count(model);++i)
+        check(std::abs(param(*restored,controls::id(model,i)).getValue()-controls::defaultValue(model,i))<1.e-6,"Old session missing new defaults");
+    for(int model:{0,1}) {
+        check(snapshot(*restored).getProperty(key(model,"matchDb"))==learned.getProperty(key(model,"matchDb")),"Old session lost original learned match");
+        for(int i=0;i<controls::count(model);++i) check(param(*restored,controls::id(model,i)).getValue()==param(*p,controls::id(model,i)).getValue(),"Old session lost original tone controls");
+    }
+    for(int model=2;model<controls::modelCount;++model) check(!static_cast<bool>(snapshot(*restored).getProperty(key(model,"hasMatch"))),"Old session invented a new learned match");
     ui.select(1); const auto tone=param(*p,controls::id(1,2)).getValue();
     ui.click("resetMatch"); auto reset=snapshot(*p);
     check(!static_cast<bool>(reset.getProperty(key(1,"hasMatch"))) && static_cast<bool>(reset.getProperty(key(0,"hasMatch"))),"Reset did not isolate one bank");

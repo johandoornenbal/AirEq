@@ -1,6 +1,6 @@
 # AirEq Studio
 
-A native studio UI for **Airwindows PearLiteEQ and BezEQ3**, using the cream,
+A native studio UI for **Airwindows PearLiteEQ, BezEQ3, FatEQ, SmoothEQ3, SmoothEQ2 and PearEQ**, using the cream,
 charcoal and brass style of [ToTape Studio](https://github.com/johandoornenbal/tape).
 **PearLiteEQ is the default.** Built with JUCE as a **VST3 for Apple Silicon Macs
 (M2 and later)**, macOS 11+. Independent adaptation; original DSP by Chris Johnson / Airwindows.
@@ -17,14 +17,30 @@ state separate so additional EQs can be added later.
 
 ## Controls
 
-The tone knobs run from Bass through Low mid, High mid and High. PearLiteEQ has
-fixed crossovers; BezEQ3 adds the four original frequency controls below the gain
-knobs. All original parameters default to **50%**. Frequency controls retain their
+The controls follow each original plugin, displayed from low to high bands:
+
+| Model | Original controls | Defaults |
+| --- | --- | --- |
+| PearLiteEQ | Bass, Low mid, High mid, High | 50% |
+| BezEQ3 | Four band levels and four frequency controls | 50% |
+| FatEQ | Bass, Low mid, High mid, High, EQ output | Tone 50%, EQ output 100% |
+| SmoothEQ3 | Bass, Mid, High | 50% |
+| SmoothEQ2 | Four band levels and four frequency controls | 50% |
+| PearEQ | Sub, Bass, Low mid, Mid, High mid, High | 50% |
+
+PearLiteEQ, FatEQ, SmoothEQ3 and PearEQ retain their fixed crossovers.
+BezEQ3 and SmoothEQ2 show the four original frequency controls below the gains.
+FatEQ's **EQ output** is Chris's original gain before his ClipOnly2 stage,
+separate from the wrapper Output trim. All processing bodies, including FatEQ's
+saturation, clipping and dithering, are unchanged. Frequency controls retain their
 original normalized mappings, including interactions and sample-rate dependence;
 they are deliberately shown as percentages, not invented Hz values. These are
 not conventional independent parametric bands.
 
 ![BezEQ3 editor](docs/ui-bezeq3.png)
+
+[FatEQ](docs/ui-fateq.png) · [SmoothEQ3](docs/ui-smootheq3.png) ·
+[SmoothEQ2](docs/ui-smootheq2.png) · [PearEQ](docs/ui-peareq.png)
 
 Double-click a knob to reset it, or type a value below it. **Reset to Default**
 resets only the selected EQ's tone/frequency controls and input/output trims.
@@ -48,7 +64,9 @@ Tooltips describe the controls.
 The illuminated stereo output meters show the final audible sample peaks, after
 trims, matching and A/B, with 120 ms attack and 450 ms release damping and a
 −60 dBFS floor. They are sample-peak displays, not VU, loudness or true-peak meters.
-Stereo input/output; float and double processing; zero fixed host latency.
+Stereo input/output; float and double processing. FatEQ retains its original
+one-sample ClipOnly2 delay and reports that latency to the host. The other models
+report zero fixed latency.
 
 ## LUFS comparison and level matching
 
@@ -68,7 +86,7 @@ can exceed available headroom. Relearn after changing the source or EQ settings.
 - **Match ON/OFF** applies or disables the selected EQ's saved adjustment.
 - **A: Original / B: Processed** compares untouched input with the EQ path including
   trims and enabled matching, using a 5 ms crossfade. The EQ keeps processing while
-  Original is selected. Neither EQ needs an extra fixed delay for comparison.
+  Original is selected. FatEQ Original and host bypass receive one sample of delay to align with its original output stage. The other models need no extra fixed delay for comparison.
 - **Reset Match** clears only the selected EQ's learned result; all EQ parameters,
   trims, linking, Match ON/OFF and A/B preferences remain as set.
 
@@ -76,6 +94,16 @@ Changing model cancels learning and preserves the last successful adjustment.
 Host bypass pauses measurement. Silent, short or failed measurements preserve the
 last successful result. New instances have no learned adjustment and open on
 Processed. Matching defaults enabled but applies unity until a match is learned.
+
+## Sessions from v0.1
+
+The original 23 host parameter IDs and indices are preserved. Existing saved
+PearLiteEQ/BezEQ3 settings, selected model and learned matches are retained; the
+new banks receive the upstream defaults. The model selector now has six choices,
+so existing host automation for that selector may need updating to its expanded
+range. Other automation parameters keep their original ranges and indices.
+Switch algorithms with playback stopped so the host can update FatEQ's one-sample
+latency compensation.
 
 ## Build, sign and install on your Mac
 
@@ -134,12 +162,13 @@ are for development validation; releases target Apple Silicon Macs.
 Upstream comparison tests cover both precisions, silence, extremes, sample rates
 44.1–192 kHz, parameter changes and variable block sizes with matched noise seeds.
 Loudness tests compare the analyser with independent libebur128 results.
-Wrapper tests cover default model, routing, latency, model banks, typed/reset
+Wrapper tests cover default model, routing, model-specific latency, all six
+model banks, typed/reset
 controls, trim linking and host gestures, session/size recall, metering and actual
 editor rendering. Matching tests exercise learning, automatic completion,
 compensation placement, relearning, exact dry A/B, model isolation, session recall,
 reset, cancellation, bypass and silent input. Editor checks write preview PNGs
-for both models in all three sizes to the build directory.
+for all six models in all three sizes to the build directory.
 
 ## Licenses
 
@@ -149,13 +178,14 @@ See [THIRD_PARTY.md](THIRD_PARTY.md) for source pins and attribution.
 
 ## Validation in this development instance
 
-Linux Release VST3 compilation passed, with all five CTest suites passing.
-Both EQ engines passed 96 exact upstream comparisons each (192 total, maximum
+Linux Release VST3 compilation passed, with all nine CTest suites passing.
+All six EQ engines passed 96 exact upstream comparisons each (576 total, maximum
 absolute error 0). LUFS analysis matched independent libebur128 results at
-44.1/48/96/192 kHz. Both editors rendered at all three sizes; the images above
+44.1/48/96/192 kHz. All six editors rendered at all three sizes; the images above
 come from the actual plugin editor at neutral settings.
 
-The Mac installer passed shell syntax checks and simulated success, signature
+The unchanged Mac installer previously passed shell syntax checks and simulated
+success, signature
 verification failure and replacement failure checks, preserving the existing
 installation in both failure cases. Simulation does not validate Apple's signing
 tools. Native macOS compilation, signing and DAW playback have not been run in

@@ -4,6 +4,10 @@
 
 #include "EQControls.h"
 #include "BezEQ3Engine.h"
+#include "FatEQEngine.h"
+#include "SmoothEQ3Engine.h"
+#include "SmoothEQ2Engine.h"
+#include "PearEQEngine.h"
 
 #include "OutputMeter.h"
 #include "MeterBallistics.h"
@@ -31,38 +35,45 @@ public:
     ~EQProcessor() override { stopTimer(); }
     static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         juce::AudioProcessorValueTreeState::ParameterLayout p;
-        // Stable separate parameter banks; append future models without changing these IDs.
-        for(int model:{0,1}) for(int i=0;i<controls::count(model);++i) {
-            auto attributes=juce::AudioParameterFloatAttributes()
-                .withStringFromValueFunction([i](float v,int) { return controls::display(i,v); })
-                .withValueFromStringFunction([i](const juce::String& text) { return static_cast<float>(controls::parse(i,text)); });
-            const auto name=controls::modelName(model)+" "+controls::name(model,i);
-            p.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{controls::id(model,i),1},
-                name,juce::NormalisableRange<float>(0,1),.5f,attributes));
-        }
-        p.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{"model",1},"EQ model",
-            juce::StringArray{"PearLiteEQ","BezEQ3"},0));
-        for(int model:{0,1})
-            p.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{controls::linkId(model),1},
-                controls::modelName(model)+" Link Input / Output",false));
-        for(int model:{0,1}) {
-            p.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{controls::matchId(model),1},
-                controls::modelName(model)+" Level Match",true));
-            p.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{controls::originalId(model),1},
-                controls::modelName(model)+" Original A/B",false));
-        }
-        for(int model:{0,1}) for(bool input:{true,false}) {
-            auto attr=juce::AudioParameterFloatAttributes().withStringFromValueFunction([](float v,int) { return juce::String(v,1)+" dB"; })
-                .withValueFromStringFunction([](const juce::String& text) { return text.getFloatValue(); });
-            p.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{input?controls::inputId(model):controls::outputId(model),1},
-                controls::modelName(model)+(input?" Input trim":" Output trim"),juce::NormalisableRange<float>(-24,24),0,attr));
-        }
+        // Preserve all 23 original host parameter indices; append new banks afterwards.
+        auto addBank=[&p](int model) {
+            for(int i=0;i<controls::count(model);++i) {
+                auto attributes=juce::AudioParameterFloatAttributes()
+                    .withStringFromValueFunction([i](float v,int) { return controls::display(i,v); })
+                    .withValueFromStringFunction([i](const juce::String& text) { return static_cast<float>(controls::parse(i,text)); });
+                p.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{controls::id(model,i),1},
+                    controls::modelName(model)+" "+controls::name(model,i),juce::NormalisableRange<float>(0,1),controls::defaultValue(model,i),attributes));
+            }
+        };
+        auto addLink=[&p](int model) {
+            p.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{controls::linkId(model),1},controls::modelName(model)+" Link Input / Output",false));
+        };
+        auto addComparison=[&p](int model) {
+            p.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{controls::matchId(model),1},controls::modelName(model)+" Level Match",true));
+            p.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{controls::originalId(model),1},controls::modelName(model)+" Original A/B",false));
+        };
+        auto addTrims=[&p](int model) {
+            for(bool input:{true,false}) {
+                auto attributes=juce::AudioParameterFloatAttributes().withStringFromValueFunction([](float v,int) { return juce::String(v,1)+" dB"; })
+                    .withValueFromStringFunction([](const juce::String& text) { return text.getFloatValue(); });
+                p.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{input?controls::inputId(model):controls::outputId(model),1},
+                    controls::modelName(model)+(input?" Input trim":" Output trim"),juce::NormalisableRange<float>(-24,24),0,attributes));
+            }
+        };
+        addBank(0); addBank(1);
+        p.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{"model",1},"EQ model",controls::choices(),0));
+        for(int model:{0,1}) addLink(model);
+        for(int model:{0,1}) addComparison(model);
+        for(int model:{0,1}) addTrims(model);
+        for(int model=2;model<controls::modelCount;++model) { addBank(model); addLink(model); addComparison(model); addTrims(model); }
         return p;
     }
     int selectedModel() const { return juce::jlimit(0,controls::modelCount-1,juce::roundToInt(modelValue->load())); }
     void prepareToPlay(double rate,int maximumBlockSize) override {
         sampleRate=rate; engine.reset(rate); engine1.reset(rate);
-        activeModel=selectedModel(); setLatencySamples(0); peaks[0]=0; peaks[1]=0;
+        engine2.reset(rate); engine3.reset(rate); engine4.reset(rate); engine5.reset(rate);
+        lastDryL=lastDryR=0;
+        activeModel=selectedModel(); setLatencySamples(controls::latency(activeModel)); peaks[0]=0; peaks[1]=0;
         meterTimeoutSeconds.store(juce::jmax(.15,2.0*maximumBlockSize/rate),std::memory_order_relaxed);
         meterSequence.fetch_add(1,std::memory_order_release);
         inputSmooth.reset(rate,.02); outputSmooth.reset(rate,.02);
@@ -101,8 +112,10 @@ public:
                     loudness.sample(dryL[dryIndex],dryR[dryIndex],left[i],right[i]);
                     if(loudness.complete()) { finishLearn(); gainSmooth.setTargetValue(targetGain(model)); }
                 }
-                // Both EQs have zero fixed latency; compare against the current dry sample.
-                const auto alignedL=dryL[dryIndex],alignedR=dryR[dryIndex];
+                // FatEQ retains the original one-sample ClipOnly2 delay. Align only dry A/B.
+                const auto alignedL=model==2?lastDryL:static_cast<double>(dryL[dryIndex]);
+                const auto alignedR=model==2?lastDryR:static_cast<double>(dryR[dryIndex]);
+                lastDryL=dryL[dryIndex]; lastDryR=dryR[dryIndex];
                 const auto gain=gainSmooth.getNextValue(),blend=blendSmooth.getNextValue();
                 if(blend<=0) { left[i]=static_cast<T>(alignedL); right[i]=static_cast<T>(alignedR); }
                 else if(blend>=1) {
@@ -126,8 +139,15 @@ public:
         const int model=selectedModel();
         syncModel(model);
         handleCommand(model);
-        if(model==0) render(engine,b,model);
-        else render(engine1,b,model);
+        switch(model) {
+            case 0: render(engine,b,model); break;
+            case 1: render(engine1,b,model); break;
+            case 2: render(engine2,b,model); break;
+            case 3: render(engine3,b,model); break;
+            case 4: render(engine4,b,model); break;
+            case 5: render(engine5,b,model); break;
+            default: break;
+        }
         publishMeters(b);
     }
     template<class T> void publishMeters(juce::AudioBuffer<T>& b) {
@@ -144,6 +164,12 @@ public:
         syncModel(selectedModel());
         handleCommand(selectedModel());
         if(b.getNumChannels()>=2 && b.getNumSamples()>0) {
+            // Host bypass must retain the same fixed latency as the active engine.
+            if(selectedModel()==2) for(int i=0;i<b.getNumSamples();++i) {
+                const auto l=b.getSample(0,i),r=b.getSample(1,i);
+                b.setSample(0,i,static_cast<T>(lastDryL)); b.setSample(1,i,static_cast<T>(lastDryR));
+                lastDryL=l; lastDryR=r;
+            } else { lastDryL=b.getSample(0,b.getNumSamples()-1); lastDryR=b.getSample(1,b.getNumSamples()-1); }
             publishMeters(b);
         }
     }
@@ -229,8 +255,16 @@ private:
         if(model!=activeModel) {
             loudness.cancel(); learning=false; progress=0; learnResult=0;
             // Reset only the entering engine, on the audio thread, without allocation.
-            if(model==0) engine.reset(sampleRate);
-            else engine1.reset(sampleRate);
+            switch(model) {
+                case 0: engine.reset(sampleRate); break;
+                case 1: engine1.reset(sampleRate); break;
+                case 2: engine2.reset(sampleRate); break;
+                case 3: engine3.reset(sampleRate); break;
+                case 4: engine4.reset(sampleRate); break;
+                case 5: engine5.reset(sampleRate); break;
+                default: break;
+            }
+            setLatencySamples(controls::latency(model));
             activeModel=model;
         }
     }
@@ -272,6 +306,11 @@ private:
     uint32_t notifiedRevision=0;
     PearLiteEQEngine engine;
     BezEQ3Engine engine1;
+    FatEQEngine engine2;
+    SmoothEQ3Engine engine3;
+    SmoothEQ2Engine engine4;
+    PearEQEngine engine5;
+    double lastDryL=0,lastDryR=0;
     std::array<std::array<std::atomic<float>*,8>,controls::modelCount> values{};
     std::atomic<float>* modelValue=nullptr;
     juce::ValueTree defaults;
@@ -352,7 +391,7 @@ public:
         learnButton.setTooltip("Learn a fixed LUFS level match for the selected model from up to 15 seconds of audible audio. Finish after at least 3 seconds.");
         resetMatchButton.setTooltip("Clear only this model's learned adjustment. EQ controls, trims, linking and A/B remain as set.");
         enableMatchButton.setTooltip("Enable or disable this model's saved level match.");
-        originalButton.setTooltip("Compare original input with the processed path, using a short crossfade. Both EQ models have zero fixed latency.");
+        originalButton.setTooltip("Compare original input with the processed path, using a short crossfade. FatEQ Original is aligned to its original one-sample ClipOnly2 delay.");
         addAndMakeVisible(matchReadout); addAndMakeVisible(matchStatus);
         matchReadout.setComponentID("matchReadout"); matchStatus.setComponentID("matchStatus");
         matchReadout.setColour(juce::Label::textColourId,style::gold);
@@ -360,8 +399,8 @@ public:
         matchStatus.setColour(juce::Label::textColourId,style::cream.withAlpha(.7f));
         matchStatus.setFont(juce::FontOptions(11.f));
         selector.setName("EQ model");
-        selector.setTooltip("Choose PearLiteEQ or BezEQ3. Each model retains its own controls and loudness match.");
-        selector.addItemList({"PearLiteEQ","BezEQ3"},1);
+        selector.setTooltip("Choose an original Airwindows EQ algorithm. Each model retains its own controls and loudness match.");
+        selector.addItemList(controls::choices(),1);
         selector.setColour(juce::ComboBox::backgroundColourId,style::ink);
         selector.setColour(juce::ComboBox::textColourId,style::gold);
         selector.setColour(juce::ComboBox::outlineColourId,style::gold.withAlpha(.4f));
@@ -375,7 +414,7 @@ public:
             const auto model=processor.selectedModel();
             for(int i=0;i<controls::count(model);++i) {
                 auto* parameter=processor.state.getParameter(controls::id(model,i));
-                parameter->beginChangeGesture(); parameter->setValueNotifyingHost(.5f); parameter->endChangeGesture();
+                parameter->beginChangeGesture(); parameter->setValueNotifyingHost(parameter->getDefaultValue()); parameter->endChangeGesture();
             }
             for(const auto& id:{controls::inputId(model),controls::outputId(model)}) {
                 auto* parameter=processor.state.getParameter(id);
@@ -414,11 +453,13 @@ public:
     std::function<void()> sizeChanged;
     void resized() override {
         sizeChoice.setBounds(750,10,180,26);
-        const int bandOrder[]{3,2,1,0};
-        for(int j=0;j<4;++j) {
-            knobs[static_cast<size_t>(bandOrder[j])].setBounds(118+j*190,383,174,150);
-            knobs[static_cast<size_t>(bandOrder[j]+4)].setBounds(118+j*190,560,174,140);
-        }
+        const auto columns=controls::primaryCount(shownModel);
+        const auto spacing=columns>4?884/columns:190;
+        const auto width=columns>4?spacing-6:174;
+        const auto start=(980-(columns-1)*spacing-width)/2;
+        for(int j=0;j<columns;++j) knobs[static_cast<size_t>(controls::primaryIndex(shownModel,j))].setBounds(start+j*spacing,383,width,150);
+        if(controls::hasFrequencies(shownModel))
+            for(int j=0;j<4;++j) knobs[static_cast<size_t>(7-j)].setBounds(118+j*190,560,174,140);
         inputSlider.setBounds(110,327,270,26); outputSlider.setBounds(665,327,267,26);
         leftMeter.setBounds(48,139,365,182);
         rightMeter.setBounds(567,139,365,182);
@@ -456,20 +497,24 @@ public:
         g.drawText("OUTPUT",600,327,65,26,juce::Justification::left);
         g.setColour(cream.withAlpha(.12f)); g.drawHorizontalLine(362,48,932);
         g.drawHorizontalLine(713,48,932);
-        const int bandOrder[]{3,2,1,0};
+        const auto columns=controls::primaryCount(shownModel);
+        const auto spacing=columns>4?884/columns:190;
+        const auto width=columns>4?spacing-6:174;
+        const auto start=(980-(columns-1)*spacing-width)/2;
         g.setColour(gold); g.setFont(juce::FontOptions(11.f));
-        for(int j=0;j<4;++j) g.drawText(juce::String(controls::name(shownModel,bandOrder[j])).toUpperCase(),118+j*190,367,174,22,juce::Justification::centred);
-        if(shownModel==1) {
+        for(int j=0;j<columns;++j) g.drawText(juce::String(controls::name(shownModel,controls::primaryIndex(shownModel,j))).toUpperCase(),start+j*spacing,367,width,22,juce::Justification::centred);
+        if(controls::hasFrequencies(shownModel)) {
             g.setColour(cream.withAlpha(.12f)); g.drawHorizontalLine(542,118,862);
             g.setColour(gold);
             for(int j=0;j<4;++j) g.drawText("FREQUENCY",118+j*190,544,174,22,juce::Justification::centred);
         } else {
             g.setColour(cream.withAlpha(.1f)); g.drawHorizontalLine(555,138,842);
             g.setColour(gold); g.setFont(juce::FontOptions(16.f));
-            g.drawText("PEAR FILTER  /  FOUR-BAND EQUALIZER",100,580,780,28,juce::Justification::centred);
+            g.drawText(controls::description(shownModel),100,580,780,28,juce::Justification::centred);
             g.setColour(cream.withAlpha(.65f)); g.setFont(juce::FontOptions(13.f));
             g.drawText("Fixed crossover network. Original Airwindows tone.",100,615,780,24,juce::Justification::centred);
-            g.drawText("50% is neutral  /  Double-click to reset  /  Type values below each dial",100,647,780,24,juce::Justification::centred);
+            g.drawText(shownModel==2?"Tone defaults: 50%  /  EQ output: 100%  /  Original ClipOnly2 retained":
+                "50% is neutral  /  Double-click to reset  /  Type values below each dial",100,647,780,24,juce::Justification::centred);
         }
         g.setColour(ink.withAlpha(.65f)); g.setFont(juce::FontOptions(11.f));
         g.drawText(controls::modelName(shownModel)+" by Airwindows  /  Independent studio edition",32,796,710,24,juce::Justification::left);
@@ -492,7 +537,7 @@ private:
             attachments[static_cast<size_t>(i)]=std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.state,controls::id(model,i),slider);
             slider.textFromValueFunction=[i](double v) { return controls::display(i,v); };
             slider.valueFromTextFunction=[i](const juce::String& text) { return controls::parse(i,text); };
-            slider.setDoubleClickReturnValue(true,.5); slider.updateText();
+            slider.setDoubleClickReturnValue(true,controls::defaultValue(model,i)); slider.updateText();
         }
         gainLinkAttachment=std::make_unique<GainLinkAttachment>(
             *processor.state.getParameter(controls::inputId(model)),

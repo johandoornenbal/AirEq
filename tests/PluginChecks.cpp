@@ -2,6 +2,11 @@
 #include "../Source/EQControls.h"
 #include "../Source/PearLiteEQEngine.h"
 #include "../Source/BezEQ3Engine.h"
+#include "../Source/FatEQEngine.h"
+#include "../Source/SmoothEQ3Engine.h"
+#include "../Source/SmoothEQ2Engine.h"
+#include "../Source/PearEQEngine.h"
+
 #include "../Source/OutputMeter.h"
 #include "../Source/MeterBallistics.h"
 #include <iostream>
@@ -11,7 +16,7 @@ juce::RangedAudioParameter& parameter(juce::AudioProcessor& p,const juce::String
     for(auto* v:p.getParameters()) if(auto* r=dynamic_cast<juce::RangedAudioParameter*>(v);r && r->paramID==id) return *r;
     throw std::runtime_error("Missing parameter "+id.toStdString());
 }
-void select(juce::AudioProcessor& p,int model) { parameter(p,"model").setValueNotifyingHost(static_cast<float>(model)); }
+void select(juce::AudioProcessor& p,int model) { parameter(p,"model").setValueNotifyingHost(parameter(p,"model").convertTo0to1(static_cast<float>(model))); }
 template<class Engine,class T> void compare(juce::AudioProcessor& p,int model,double rate) {
     select(p,model);
     p.setProcessingPrecision(std::is_same_v<T,float>?juce::AudioProcessor::singlePrecision:juce::AudioProcessor::doublePrecision);
@@ -36,7 +41,7 @@ template<class Engine,class T> void compare(juce::AudioProcessor& p,int model,do
         for(int c=0;c<2;++c) for(int i=0;i<n;++i)
             require(std::isfinite(b.getSample(c,i)) && b.getSample(c,i)==expected.getSample(c,i),"Wrapper altered engine output at unity trims");
     }
-    require(p.getLatencySamples()==0,"Wrong host latency"); p.releaseResources();
+    require(p.getLatencySamples()==controls::latency(model),"Wrong host latency"); p.releaseResources();
 }
 struct HostObserver:juce::AudioProcessorParameter::Listener {
     int values=0,begins=0,ends=0;
@@ -76,7 +81,7 @@ struct UI {
 bool close(double a,double b) { return std::abs(a-b)<1.e-5; }
 void trimChecks() {
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter()); UI ui(*p);
-    for(int model:{0,1}) {
+    for(int model=0;model<controls::modelCount;++model) {
         ui.selectModel(model);
         auto& input=ui.slider("Input trim"); auto& output=ui.slider("Output trim");
         require(close(input.getValue(),0) && close(output.getValue(),0) && !ui.link().getToggleState(),"Trim/link defaults wrong");
@@ -100,15 +105,38 @@ void trimChecks() {
         // A known output trim must be applied exactly once after the original EQ.
         out.setValueNotifyingHost(out.convertTo0to1(-6));
         p->setProcessingPrecision(juce::AudioProcessor::doublePrecision); p->prepareToPlay(48000,256);
-        PearLiteEQEngine pear; BezEQ3Engine bez; pear.reset(48000); bez.reset(48000);
+        PearLiteEQEngine pear; BezEQ3Engine bez;
+        FatEQEngine fat; SmoothEQ3Engine smooth3; SmoothEQ2Engine smooth2; PearEQEngine fullPear;
+        pear.reset(48000); bez.reset(48000); fat.reset(48000); smooth3.reset(48000); smooth2.reset(48000); fullPear.reset(48000);
         juce::AudioBuffer<double> audio(2,256),expected(2,256); juce::MidiBuffer midi;
         for(int i=0;i<256;++i) for(int c=0;c<2;++c) audio.setSample(c,i,.1*std::sin(i*.05*(c+1)));
         expected.makeCopyOf(audio); double* ptr[]{expected.getWritePointer(0),expected.getWritePointer(1)};
-        if(model==0) pear.processDoubleReplacing(ptr,ptr,256); else bez.processDoubleReplacing(ptr,ptr,256);
+        switch(model) {
+            case 0: pear.processDoubleReplacing(ptr,ptr,256); break;
+            case 1: bez.processDoubleReplacing(ptr,ptr,256); break;
+            case 2: fat.processDoubleReplacing(ptr,ptr,256); break;
+            case 3: smooth3.processDoubleReplacing(ptr,ptr,256); break;
+            case 4: smooth2.processDoubleReplacing(ptr,ptr,256); break;
+            case 5: fullPear.processDoubleReplacing(ptr,ptr,256); break;
+        }
         p->processBlock(audio,midi);
         for(int c=0;c<2;++c) for(int i=0;i<256;++i) require(std::abs(audio.getSample(c,i)-expected.getSample(c,i)*std::pow(10.,-6./20.))<1.e-12,"Output trim applied incorrectly");
         p->releaseResources(); out.setValueNotifyingHost(out.getDefaultValue());
     }
+}
+template<class T> void bypassChecks(juce::AudioProcessor& p,int model,double rate) {
+    select(p,model); p.prepareToPlay(rate,37);
+    T previous[2]{};
+    juce::AudioBuffer<T> b(2,37); juce::MidiBuffer midi;
+    for(int block=0;block<4;++block) {
+        for(int c=0;c<2;++c) for(int i=0;i<37;++i) b.setSample(c,i,static_cast<T>((block*37+i+1)*.001*(c+1)));
+        juce::AudioBuffer<T> dry; dry.makeCopyOf(b); p.processBlockBypassed(b,midi);
+        for(int c=0;c<2;++c) {
+            for(int i=0;i<37;++i) require(b.getSample(c,i)==(controls::latency(model)?(i==0?previous[c]:dry.getSample(c,i-1)):dry.getSample(c,i)),"Host bypass latency is wrong");
+            previous[c]=dry.getSample(c,36);
+        }
+    }
+    p.releaseResources();
 }
 void meterChecks() {
     MeterBallistics meter;
@@ -126,16 +154,29 @@ int main() try {
     juce::ScopedJuceInitialiser_GUI init;
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     require(parameter(*p,"model").getValue()==0,"PearLiteEQ is not the default");
-    require(p->getParameters().size()==23,"Unexpected parameter layout");
+    require(p->getParameters().size()==65,"Unexpected parameter layout");
+    juce::StringArray oldIds;
+    for(int model:{0,1}) for(int i=0;i<controls::count(model);++i) oldIds.add(controls::id(model,i));
+    oldIds.add("model");
+    for(int model:{0,1}) oldIds.add(controls::linkId(model));
+    for(int model:{0,1}) { oldIds.add(controls::matchId(model)); oldIds.add(controls::originalId(model)); }
+    for(int model:{0,1}) { oldIds.add(controls::inputId(model)); oldIds.add(controls::outputId(model)); }
+    for(int i=0;i<oldIds.size();++i) require(dynamic_cast<juce::RangedAudioParameter*>(p->getParameters()[i])->paramID==oldIds[i],"Original parameter order changed");
     for(double rate:{44100.,48000.,96000.,192000.}) {
+        for(int model=0;model<controls::modelCount;++model) { bypassChecks<float>(*p,model,rate); bypassChecks<double>(*p,model,rate); }
         compare<PearLiteEQEngine,float>(*p,0,rate); compare<PearLiteEQEngine,double>(*p,0,rate);
         compare<BezEQ3Engine,float>(*p,1,rate); compare<BezEQ3Engine,double>(*p,1,rate);
+        compare<FatEQEngine,float>(*p,2,rate); compare<FatEQEngine,double>(*p,2,rate);
+        compare<SmoothEQ3Engine,float>(*p,3,rate); compare<SmoothEQ3Engine,double>(*p,3,rate);
+        compare<SmoothEQ2Engine,float>(*p,4,rate); compare<SmoothEQ2Engine,double>(*p,4,rate);
+        compare<PearEQEngine,float>(*p,5,rate); compare<PearEQEngine,double>(*p,5,rate);
+
     }
     meterChecks(); trimChecks();
     UI ui(*p);
-    for(int model:{0,1,0}) {
+    for(int model:{0,1,2,3,4,5,0}) {
         ui.selectModel(model);
-        require(close(parameter(*p,"model").getValue(),model),"Selector not bound");
+        require(close(parameter(*p,"model").convertFrom0to1(parameter(*p,"model").getValue()),model),"Selector not bound");
         int visible=0;
         for(auto* child:ui.panel().getChildren()) if(auto* slider=dynamic_cast<juce::Slider*>(child);slider && slider->isVisible()) ++visible;
         require(visible==controls::count(model)+2,"Wrong visible parameter bank");
@@ -144,11 +185,11 @@ int main() try {
             slider.setValue(.31,juce::sendNotificationSync);
             require(close(parameter(*p,controls::id(model,i)).getValue(),.31),"Knob not bound to selected bank");
             require(close(slider.getValueFromText("75 %"),.75),"Typed value mapping wrong");
-            require(slider.isDoubleClickReturnEnabled() && close(slider.getDoubleClickReturnValue(),.5),"Double click default wrong");
+            require(slider.isDoubleClickReturnEnabled() && close(slider.getDoubleClickReturnValue(),controls::defaultValue(model,i)),"Double click default wrong");
         }
         for(auto* child:ui.panel().getChildren()) if(child->isVisible()) require(ui.panel().getLocalBounds().contains(child->getBounds()),"Control outside editor");
         // Render neutral settings for documentation after exercising the bindings.
-        for(int i=0;i<controls::count(model);++i) ui.slider(controls::name(model,i)).setValue(.5,juce::sendNotificationSync);
+        for(int i=0;i<controls::count(model);++i) ui.slider(controls::name(model,i)).setValue(controls::defaultValue(model,i),juce::sendNotificationSync);
         auto& sizes=dynamic_cast<juce::ComboBox&>(ui.component("uiSize"));
         for(int size:{1,2,3}) {
             sizes.setSelectedId(size,juce::sendNotificationSync);
@@ -164,11 +205,18 @@ int main() try {
     for(int i=0;i<8;++i) require(close(parameter(*p,controls::id(1,i)).getValue(),.5),"Reset missed EQ parameter");
     require(close(parameter(*p,controls::inputId(1)).convertFrom0to1(parameter(*p,controls::inputId(1)).getValue()),0),"Reset missed trim");
     require(close(parameter(*p,controls::id(0,0)).getValue(),.31),"Reset changed other bank");
+    for(int model=2;model<controls::modelCount;++model) {
+        ui.selectModel(model);
+        for(int i=0;i<controls::count(model);++i) ui.slider(controls::name(model,i)).setValue(.12,juce::sendNotificationSync);
+        dynamic_cast<juce::TextButton&>(ui.component("resetParameters")).onClick();
+        for(int i=0;i<controls::count(model);++i) require(close(parameter(*p,controls::id(model,i)).getValue(),controls::defaultValue(model,i)),"New model reset missed original default");
+    }
+    ui.selectModel(1);
     juce::MemoryBlock bytes; p->getStateInformation(bytes);
     std::unique_ptr<juce::AudioProcessor> restored(createPluginFilter()); restored->setStateInformation(bytes.getData(),static_cast<int>(bytes.getSize()));
     for(auto* raw:p->getParameters()) if(auto* v=dynamic_cast<juce::RangedAudioParameter*>(raw)) require(close(parameter(*restored,v->paramID).getValue(),v->getValue()),"Session lost parameter");
     UI recalled(*restored); require(recalled.editor->getWidth()==1225,"Session lost UI size");
     const char invalid[]{'b','a','d'}; restored->setStateInformation(invalid,3);
-    require(parameter(*restored,"model").getValue()==1,"Invalid state damaged session");
-    std::cout<<"Default model, float/double routing, zero latency, UI banks/sizes, trims/link gestures, meters, reset and session recall passed\n";
+    require(close(parameter(*restored,"model").convertFrom0to1(parameter(*restored,"model").getValue()),1),"Invalid state damaged session");
+    std::cout<<"Default model, float/double routing, per-model latency, UI banks/sizes, trims/link gestures, meters, reset and session recall passed\n";
 } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
