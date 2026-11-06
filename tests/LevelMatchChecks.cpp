@@ -8,6 +8,7 @@
 #include "../Source/PearEQEngine.h"
 #include "../Source/EverySlewEngine.h"
 #include "../Source/Slew4Engine.h"
+#include "../Source/Air4Engine.h"
 
 #include "../Source/LoudnessMatch.h"
 #include <iostream>
@@ -151,6 +152,7 @@ int main() try {
     learn<PearEQEngine>(*p,ui,5);
     learn<EverySlewEngine>(*p,ui,6);
     learn<Slew4Engine>(*p,ui,7);
+    learn<Air4Engine>(*p,ui,8);
 
     in.setValueNotifyingHost(in.getDefaultValue()); out.setValueNotifyingHost(out.getDefaultValue());
     const auto learned=snapshot(*p);
@@ -172,6 +174,7 @@ int main() try {
     verifyAppliedAfterSwitch<PearEQEngine>(*p,5);
     verifyAppliedAfterSwitch<EverySlewEngine>(*p,6);
     verifyAppliedAfterSwitch<Slew4Engine>(*p,7);
+    verifyAppliedAfterSwitch<Air4Engine>(*p,8);
 
     p->releaseResources();
     for(int model=0;model<controls::modelCount;++model) { original<float>(*p,model); original<double>(*p,model); }
@@ -179,7 +182,7 @@ int main() try {
         param(*p,controls::originalId(model)).setValueNotifyingHost(model%2?1.f:0.f);
         param(*p,controls::matchId(model)).setValueNotifyingHost(model%2?0.f:1.f);
     }
-    for(int model:{0,1,2,3,4,5,6,7,0,1}) {
+    for(int model:{0,1,2,3,4,5,6,7,8,0,1}) {
         ui.select(model);
         check(dynamic_cast<juce::TextButton&>(ui.component("matchEnabled")).getToggleState()==(model%2==0),"Model match enable not recalled");
         check(dynamic_cast<juce::TextButton&>(ui.component("abOriginal")).getToggleState()==(model%2==1),"Model A/B not recalled");
@@ -194,10 +197,24 @@ int main() try {
         check(param(*restored,controls::originalId(model)).getValue()==param(*p,controls::originalId(model)).getValue(),"Session lost A/B");
         check(param(*restored,controls::matchId(model)).getValue()==param(*p,controls::matchId(model)).getValue(),"Session lost match enable");
     }
+    // Loading an eight-model session preserves all old banks and initializes Air4.
+    auto eight=learned.createCopy();
+    for(int i=eight.getNumChildren();--i>=0;)
+        if(eight.getChild(i).getProperty("id").toString().startsWith("air4_")) eight.removeChild(i,nullptr);
+    for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) eight.removeProperty(key(8,property),nullptr);
+    eight.getChildWithProperty("id","model").setProperty("value",7,nullptr);
+    restore(*restored,eight);
+    check(std::abs(param(*restored,"model").convertFrom0to1(param(*restored,"model").getValue())-7.f)<1.e-6,"Eight-model session lost Slew4 selection");
+    for(int model=0;model<8;++model) {
+        for(int i=0;i<controls::count(model);++i) check(param(*restored,controls::id(model,i)).getValue()==param(*p,controls::id(model,i)).getValue(),"Eight-model session lost controls");
+        check(snapshot(*restored).getProperty(key(model,"matchDb"))==learned.getProperty(key(model,"matchDb")),"Eight-model session lost learned match");
+    }
+    for(int i=0;i<controls::count(8);++i) check(std::abs(param(*restored,controls::id(8,i)).getValue()-controls::defaultValue(8,i))<1.e-6,"Eight-model session lost Air4 defaults");
+    check(!static_cast<bool>(snapshot(*restored).getProperty(key(8,"hasMatch"))),"Eight-model session invented Air4 match");
     auto previous=learned.createCopy();
     for(int i=previous.getNumChildren();--i>=0;) {
         const auto id=previous.getChild(i).getProperty("id").toString();
-        if(id.startsWith("everyslew_") || id.startsWith("slew4_")) previous.removeChild(i,nullptr);
+        if(id.startsWith("everyslew_") || id.startsWith("slew4_") || id.startsWith("air4_")) previous.removeChild(i,nullptr);
     }
     for(int model=6;model<controls::modelCount;++model) for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) previous.removeProperty(key(model,property),nullptr);
     previous.getChildWithProperty("id","model").setProperty("value",5,nullptr);

@@ -8,6 +8,7 @@
 #include "../Source/PearEQEngine.h"
 #include "../Source/EverySlewEngine.h"
 #include "../Source/Slew4Engine.h"
+#include "../Source/Air4Engine.h"
 
 #include "../Source/OutputMeter.h"
 #include "../Source/MeterBallistics.h"
@@ -109,6 +110,7 @@ void trimChecks() {
         p->setProcessingPrecision(juce::AudioProcessor::doublePrecision); p->prepareToPlay(48000,256);
         PearLiteEQEngine pear; BezEQ3Engine bez;
         FatEQEngine fat; SmoothEQ3Engine smooth3; SmoothEQ2Engine smooth2; PearEQEngine fullPear;
+        Air4Engine air; air.reset(48000);
         EverySlewEngine every; Slew4Engine slew; every.reset(48000); slew.reset(48000);
         pear.reset(48000); bez.reset(48000); fat.reset(48000); smooth3.reset(48000); smooth2.reset(48000); fullPear.reset(48000);
         juce::AudioBuffer<double> audio(2,256),expected(2,256); juce::MidiBuffer midi;
@@ -123,6 +125,7 @@ void trimChecks() {
             case 5: fullPear.processDoubleReplacing(ptr,ptr,256); break;
             case 6: every.processDoubleReplacing(ptr,ptr,256); break;
             case 7: slew.processDoubleReplacing(ptr,ptr,256); break;
+            case 8: air.processDoubleReplacing(ptr,ptr,256); break;
         }
         p->processBlock(audio,midi);
         for(int c=0;c<2;++c) for(int i=0;i<256;++i) require(std::abs(audio.getSample(c,i)-expected.getSample(c,i)*std::pow(10.,-6./20.))<1.e-12,"Output trim applied incorrectly");
@@ -161,19 +164,19 @@ int main() try {
     juce::ScopedJuceInitialiser_GUI init;
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     require(parameter(*p,"model").getValue()==0,"PearLiteEQ is not the default");
-    require(p->getParameters().size()==80,"Unexpected parameter layout");
+    require(p->getParameters().size()==89,"Unexpected parameter layout");
     juce::StringArray oldIds;
     for(int model:{0,1}) for(int i=0;i<controls::count(model);++i) oldIds.add(controls::id(model,i));
     oldIds.add("model");
     for(int model:{0,1}) oldIds.add(controls::linkId(model));
     for(int model:{0,1}) { oldIds.add(controls::matchId(model)); oldIds.add(controls::originalId(model)); }
     for(int model:{0,1}) { oldIds.add(controls::inputId(model)); oldIds.add(controls::outputId(model)); }
-    for(int model=2;model<6;++model) {
+    for(int model=2;model<8;++model) {
         for(int i=0;i<controls::count(model);++i) oldIds.add(controls::id(model,i));
         oldIds.add(controls::linkId(model)); oldIds.add(controls::matchId(model)); oldIds.add(controls::originalId(model));
         oldIds.add(controls::inputId(model)); oldIds.add(controls::outputId(model));
     }
-    require(oldIds.size()==65,"Old parameter fixture is incomplete");
+    require(oldIds.size()==80,"Old parameter fixture is incomplete");
     for(int i=0;i<oldIds.size();++i) require(dynamic_cast<juce::RangedAudioParameter*>(p->getParameters()[i])->paramID==oldIds[i],"Original parameter order changed");
     for(double rate:{44100.,48000.,96000.,192000.}) {
         for(int model=0;model<controls::modelCount;++model) { bypassChecks<float>(*p,model,rate); bypassChecks<double>(*p,model,rate); }
@@ -185,11 +188,12 @@ int main() try {
         compare<PearEQEngine,float>(*p,5,rate); compare<PearEQEngine,double>(*p,5,rate);
         compare<EverySlewEngine,float>(*p,6,rate); compare<EverySlewEngine,double>(*p,6,rate);
         compare<Slew4Engine,float>(*p,7,rate); compare<Slew4Engine,double>(*p,7,rate);
+        compare<Air4Engine,float>(*p,8,rate); compare<Air4Engine,double>(*p,8,rate);
 
     }
     meterChecks(); trimChecks();
     UI ui(*p);
-    for(int model:{0,1,2,3,4,5,6,7,0}) {
+    for(int model:{0,1,2,3,4,5,6,7,8,0}) {
         ui.selectModel(model);
         require(close(parameter(*p,"model").convertFrom0to1(parameter(*p,"model").getValue()),model),"Selector not bound");
         int visible=0;

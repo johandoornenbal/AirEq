@@ -5,7 +5,7 @@
 Source: https://github.com/airwindows/airwindows
 Commit: `7fd5f5cae262a41e6dd7d9a83d60c46e84d3092a` (retrieved 2026-11-06).
 The original `plugins/WinVST/` sources for PearLiteEQ, BezEQ3, FatEQ, SmoothEQ3,
-SmoothEQ2, PearEQ, EverySlew and Slew4 (headers, wrappers and processing sources)
+SmoothEQ2, PearEQ, EverySlew, Slew4 and Air4 (headers, wrappers and processing sources)
 are retained unchanged under `third_party/airwindows/`, together with the upstream MIT license.
 Copyright Chris Johnson / Airwindows.
 

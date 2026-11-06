@@ -10,6 +10,7 @@
 #include "PearEQEngine.h"
 #include "EverySlewEngine.h"
 #include "Slew4Engine.h"
+#include "Air4Engine.h"
 
 #include "OutputMeter.h"
 #include "MeterBallistics.h"
@@ -73,7 +74,7 @@ public:
     int selectedModel() const { return juce::jlimit(0,controls::modelCount-1,juce::roundToInt(modelValue->load())); }
     void prepareToPlay(double rate,int maximumBlockSize) override {
         sampleRate=rate; engine.reset(rate); engine1.reset(rate);
-        engine2.reset(rate); engine3.reset(rate); engine4.reset(rate); engine5.reset(rate); engine6.reset(rate); engine7.reset(rate);
+        engine2.reset(rate); engine3.reset(rate); engine4.reset(rate); engine5.reset(rate); engine6.reset(rate); engine7.reset(rate); engine8.reset(rate);
         dryHistory={};
         activeModel=selectedModel(); setLatencySamples(controls::latency(activeModel)); peaks[0]=0; peaks[1]=0;
         meterTimeoutSeconds.store(juce::jmax(.15,2.0*maximumBlockSize/rate),std::memory_order_relaxed);
@@ -149,6 +150,7 @@ public:
             case 5: render(engine5,b,model); break;
             case 6: render(engine6,b,model); break;
             case 7: render(engine7,b,model); break;
+            case 8: render(engine8,b,model); break;
             default: break;
         }
         publishMeters(b);
@@ -267,6 +269,7 @@ private:
                 case 5: engine5.reset(sampleRate); break;
                 case 6: engine6.reset(sampleRate); break;
                 case 7: engine7.reset(sampleRate); break;
+                case 8: engine8.reset(sampleRate); break;
                 default: break;
             }
             setLatencySamples(controls::latency(model));
@@ -317,6 +320,7 @@ private:
     PearEQEngine engine5;
     EverySlewEngine engine6;
     Slew4Engine engine7;
+    Air4Engine engine8;
     // [0] is the previous input sample; [1] is two samples back.
     std::array<std::array<double,2>,2> dryHistory{};
     std::array<double,2> alignedDry(double left,double right,int delay) {
@@ -502,7 +506,7 @@ public:
         g.setColour(gold); g.setFont(juce::FontOptions(13.f));
         g.drawText(controls::modelName(shownModel),426,158,128,22,juce::Justification::centred);
         g.setFont(juce::FontOptions(36.f));
-        g.drawText(shownModel>=6?"SLEW":"EQ",426,193,128,54,juce::Justification::centred);
+        g.drawText((shownModel==6 || shownModel==7)?"SLEW":"EQ",426,193,128,54,juce::Justification::centred);
         g.setColour(muted); g.setFont(juce::FontOptions(10.f));
         g.drawText("STEREO",426,256,128,18,juce::Justification::centred);
         g.drawText("SAMPLE PEAK",426,275,128,18,juce::Justification::centred);
@@ -527,9 +531,11 @@ public:
             g.drawText(controls::description(shownModel),100,580,780,28,juce::Justification::centred);
             g.setColour(cream.withAlpha(.65f)); g.setFont(juce::FontOptions(13.f));
             g.drawText(shownModel==6?"Original multistage limiting with halo and inverse/dry/wet blend.":
+                shownModel==8?"Original Air/Gnd voicing and Sinew dynamics.":
                 shownModel==7?"Original adaptive averaging and two-sample lookahead.":
                 "Fixed crossover network. Original Airwindows tone.",100,615,780,24,juce::Justification::centred);
             g.drawText(shownModel==6?"Defaults: Slew 0%  /  Depth 100%  /  Halo 16%  /  Inv/Wet 100%":
+                shownModel==8?"Defaults: Air 50%  /  Gnd 50%  /  DarkF 52%  /  Ratio 0%":
                 shownModel==7?"Slew default: 50%  /  Double-click to reset  /  Type values below the dial":
                 shownModel==2?"Tone defaults: 50%  /  EQ output: 100%  /  Original ClipOnly2 retained":
                 "50% is neutral  /  Double-click to reset  /  Type values below each dial",100,647,780,24,juce::Justification::centred);

@@ -1,7 +1,7 @@
 # AirEq Studio
 
 A native studio UI for **Airwindows PearLiteEQ, BezEQ3, FatEQ, SmoothEQ3,
-SmoothEQ2, PearEQ, EverySlew and Slew4**, using the cream,
+SmoothEQ2, PearEQ, EverySlew, Slew4 and Air4**, using the cream,
 charcoal and brass style of [ToTape Studio](https://github.com/johandoornenbal/tape).
 **PearLiteEQ is the default.** Built with JUCE as a **VST3 for Apple Silicon Macs
 (M2 and later)**, macOS 11+. Independent adaptation; original DSP by Chris Johnson / Airwindows.
@@ -31,6 +31,11 @@ The controls follow each original plugin, displayed from low to high bands:
 | PearEQ | Sub, Bass, Low mid, Mid, High mid, High | 50% |
 | EverySlew | Slew, Depth, Halo, Inv/Wet | 0%, 100%, 16%, 100% |
 | Slew4 | Slew | 50% |
+| Air4 | Air, Gnd, DarkF, Ratio | 50%, 50%, 52%, 0% |
+
+Air4 is the ninth algorithm and retains its original Air/Gnd voicing and Sinew dynamics.
+DarkF and Ratio are native normalized controls, not Hz or numerical compression ratios.
+Its original processing is unchanged; it uses the same LUFS comparison, trims and gain linking as the other models.
 
 PearLiteEQ, FatEQ, SmoothEQ3 and PearEQ retain their fixed crossovers.
 BezEQ3 and SmoothEQ2 show the four original frequency controls below the gains.
@@ -52,7 +57,7 @@ while keeping that lookahead. Slew4's 50% default is not a neutral EQ setting.
 
 [FatEQ](docs/ui-fateq.png) · [SmoothEQ3](docs/ui-smootheq3.png) ·
 [SmoothEQ2](docs/ui-smootheq2.png) · [PearEQ](docs/ui-peareq.png) ·
-[EverySlew](docs/ui-everyslew.png) · [Slew4](docs/ui-slew4.png)
+[EverySlew](docs/ui-everyslew.png) · [Slew4](docs/ui-slew4.png) · [Air4](docs/ui-air4.png)
 
 Double-click a knob to reset it, or type a value below it. **Reset to Default**
 resets only the selected model's original controls and input/output trims.
@@ -114,10 +119,10 @@ Processed. Matching defaults enabled but applies unity until a match is learned.
 
 ## Existing sessions
 
-All 65 host parameter IDs and indices from the six-model v0.2 release are
+All 80 host parameter IDs and indices from the eight-model v0.3 release are
 preserved, including the original 23 from v0.1. Existing model selection,
 controls, trims and learned matches are retained; the new banks receive the
-upstream defaults. The selector now has eight choices, so existing host
+upstream defaults. The selector now has nine choices, so existing host
 automation for that selector may need updating to its expanded range. Other
 parameters keep their original ranges and indices. Switch algorithms with
 playback stopped so the host can update FatEQ/Slew4 latency compensation.
@@ -179,13 +184,13 @@ are for development validation; releases target Apple Silicon Macs.
 Upstream comparison tests cover both precisions, silence, extremes, sample rates
 44.1–192 kHz, parameter changes and variable block sizes with matched noise seeds.
 Loudness tests compare the analyser with independent libebur128 results.
-Wrapper tests cover default model, routing, model-specific latency, all eight
+Wrapper tests cover default model, routing, model-specific latency, all nine
 model banks, typed/reset
 controls, trim linking and host gestures, session/size recall, metering and actual
 editor rendering. Matching tests exercise learning, automatic completion,
 compensation placement, relearning, exact dry A/B, model isolation, session recall,
 reset, cancellation, bypass and silent input. Editor checks write preview PNGs
-for all eight models in all three sizes to the build directory.
+for all nine models in all three sizes to the build directory.
 
 ## Licenses
 
@@ -195,10 +200,10 @@ See [THIRD_PARTY.md](THIRD_PARTY.md) for source pins and attribution.
 
 ## Validation in this development instance
 
-Linux Release VST3 compilation passed, with all eleven CTest suites passing.
-All eight engines passed 96 exact upstream comparisons each (768 total, maximum
+Linux Release VST3 compilation passed, with all twelve CTest suites passing.
+All nine engines passed 96 exact upstream comparisons each (864 total, maximum
 absolute error 0). LUFS analysis matched independent libebur128 results at
-44.1/48/96/192 kHz. All eight editors rendered at all three sizes; the images above
+44.1/48/96/192 kHz. All nine editors rendered at all three sizes; the images above
 come from the actual plugin editor at the upstream default settings.
 
 The unchanged Mac installer previously passed shell syntax checks and simulated
