@@ -1,0 +1,11 @@
+{
+  "BiquadHiLo/BiquadHiLo.cpp": "6cc023673bd41cdaa1ab3b09301dc2ebda5f7cfbe936987c47d9c12b830789ba",
+  "BiquadHiLo/BiquadHiLo.h": "f3ca4f746b87c79e3430c347c11a75681069d2ae8fec36ae8c2177022cfc046a",
+  "BiquadHiLo/BiquadHiLoProc.cpp": "db7d871fa380ee97d4aec8a24d7d7cb2dfa86d4c012fad3e0314b07634c0399a",
+  "BiquadStack/BiquadStack.h": "e41491f3d47f3cb2acb229f152bc9c3de464b00c93c97e630fa548e79e55d094",
+  "BiquadStack/BiquadStackProc.cpp": "b7e4c9636b11eb44098d614d6851c1a9f37a42e7ff5cb86c2cd13fa0abf348d2",
+  "BiquadStack/BiquadStack.cpp": "05d0eb7ed5837703e945a18ba9a6f9990710bebb741019ee02c2fe52a6e4ff03",
+  "BiquadNonLin/BiquadNonLin.cpp": "9d288f53777320991c1822bc7f13f7219d1211dfbaf932866a4d251ba7f1ced9",
+  "BiquadNonLin/BiquadNonLinProc.cpp": "4359af6aec7f74abab4afcd313e97638d809703fd470b205a3a6e3457b7955ea",
+  "BiquadNonLin/BiquadNonLin.h": "2f871548288c314054e678ecfc9bdcde49276c7ff2bb11012cb3600d6b960771"
+}

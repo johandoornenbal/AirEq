@@ -67,3 +67,21 @@ with the applicable JUCE license, including corresponding source obligations whe
 using AGPLv3, or use an appropriate commercial license. The wrapper's MIT license
 does not relicense JUCE. Retain the VST3 SDK notices bundled with JUCE.
 This is an independent adaptation, not an official Airwindows or JUCE release.
+
+## Biquad additions (v0.5)
+
+BiquadHiLo, BiquadStack and BiquadNonLin are vendored unchanged from
+https://github.com/airwindows/airwindows at commit
+`94cb6793893027fb418ffac7cdbfcb9b4c82aadb` (retrieved 2026-11-14).
+Their original headers, wrappers and float/double processing sources live in
+`third_party/airwindows`; `BIQUAD-SHA256.json` records source hashes.
+`python3 scripts/verify-biquad-dsp.py` verifies hashes and byte-identical processing
+bodies in their standalone engines. Original coefficient interpolation, filter
+responses, parameter mappings and dither are retained. Engines expose reset and
+clamped parameter setters with the same deterministic noise seeds as the earlier
+models. No existing engine is changed. The wrapper preserves host block boundaries
+up to the prepared maximum block size for the Biquads, instead of subdividing
+those calls into 256-sample pieces; oversized host blocks are processed in bounded
+pieces without allocating in the audio callback. The three models have no added
+fixed latency. Existing host parameter indices and IDs are retained; new banks
+are appended. Matching and trims remain wrapper features outside the DSP.

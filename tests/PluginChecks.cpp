@@ -9,6 +9,10 @@
 #include "../Source/EverySlewEngine.h"
 #include "../Source/Slew4Engine.h"
 #include "../Source/Air4Engine.h"
+#include "../Source/BiquadHiLoEngine.h"
+#include "../Source/BiquadStackEngine.h"
+#include "../Source/BiquadNonLinEngine.h"
+
 
 #include "../Source/OutputMeter.h"
 #include "../Source/MeterBallistics.h"
@@ -32,6 +36,10 @@ template<class Engine,class T> void compare(juce::AudioProcessor& p,int model,do
     juce::MidiBuffer midi;
     for(int block=0;block<20;++block) {
         const auto n=std::array<int,4>{1,37,257,513}[static_cast<size_t>(block%4)];
+        if(model>=9 && block==10) {
+            parameter(p,controls::id(model,0)).setValueNotifyingHost(.8f); reference.setParameter(0,.8f);
+            parameter(p,controls::id(model,1)).setValueNotifyingHost(.21f); reference.setParameter(1,.21f);
+        }
         juce::AudioBuffer<T> b(2,n),expected(2,n);
         for(int c=0;c<2;++c) for(int i=0;i<n;++i) {
             const auto value=static_cast<T>(.3*std::sin((block*513+i)*.05*(c+1)));
@@ -111,6 +119,10 @@ void trimChecks() {
         PearLiteEQEngine pear; BezEQ3Engine bez;
         FatEQEngine fat; SmoothEQ3Engine smooth3; SmoothEQ2Engine smooth2; PearEQEngine fullPear;
         Air4Engine air; air.reset(48000);
+        BiquadHiLoEngine biquad9; biquad9.reset(48000);
+        BiquadStackEngine biquad10; biquad10.reset(48000);
+        BiquadNonLinEngine biquad11; biquad11.reset(48000);
+
         EverySlewEngine every; Slew4Engine slew; every.reset(48000); slew.reset(48000);
         pear.reset(48000); bez.reset(48000); fat.reset(48000); smooth3.reset(48000); smooth2.reset(48000); fullPear.reset(48000);
         juce::AudioBuffer<double> audio(2,256),expected(2,256); juce::MidiBuffer midi;
@@ -126,6 +138,10 @@ void trimChecks() {
             case 6: every.processDoubleReplacing(ptr,ptr,256); break;
             case 7: slew.processDoubleReplacing(ptr,ptr,256); break;
             case 8: air.processDoubleReplacing(ptr,ptr,256); break;
+            case 9: biquad9.processDoubleReplacing(ptr,ptr,256); break;
+            case 10: biquad10.processDoubleReplacing(ptr,ptr,256); break;
+            case 11: biquad11.processDoubleReplacing(ptr,ptr,256); break;
+
         }
         p->processBlock(audio,midi);
         for(int c=0;c<2;++c) for(int i=0;i<256;++i) require(std::abs(audio.getSample(c,i)-expected.getSample(c,i)*std::pow(10.,-6./20.))<1.e-12,"Output trim applied incorrectly");
@@ -164,19 +180,19 @@ int main() try {
     juce::ScopedJuceInitialiser_GUI init;
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     require(parameter(*p,"model").getValue()==0,"PearLiteEQ is not the default");
-    require(p->getParameters().size()==89,"Unexpected parameter layout");
+    require(p->getParameters().size()==114,"Unexpected parameter layout");
     juce::StringArray oldIds;
     for(int model:{0,1}) for(int i=0;i<controls::count(model);++i) oldIds.add(controls::id(model,i));
     oldIds.add("model");
     for(int model:{0,1}) oldIds.add(controls::linkId(model));
     for(int model:{0,1}) { oldIds.add(controls::matchId(model)); oldIds.add(controls::originalId(model)); }
     for(int model:{0,1}) { oldIds.add(controls::inputId(model)); oldIds.add(controls::outputId(model)); }
-    for(int model=2;model<8;++model) {
+    for(int model=2;model<9;++model) {
         for(int i=0;i<controls::count(model);++i) oldIds.add(controls::id(model,i));
         oldIds.add(controls::linkId(model)); oldIds.add(controls::matchId(model)); oldIds.add(controls::originalId(model));
         oldIds.add(controls::inputId(model)); oldIds.add(controls::outputId(model));
     }
-    require(oldIds.size()==80,"Old parameter fixture is incomplete");
+    require(oldIds.size()==89,"Old parameter fixture is incomplete");
     for(int i=0;i<oldIds.size();++i) require(dynamic_cast<juce::RangedAudioParameter*>(p->getParameters()[i])->paramID==oldIds[i],"Original parameter order changed");
     for(double rate:{44100.,48000.,96000.,192000.}) {
         for(int model=0;model<controls::modelCount;++model) { bypassChecks<float>(*p,model,rate); bypassChecks<double>(*p,model,rate); }
@@ -189,11 +205,15 @@ int main() try {
         compare<EverySlewEngine,float>(*p,6,rate); compare<EverySlewEngine,double>(*p,6,rate);
         compare<Slew4Engine,float>(*p,7,rate); compare<Slew4Engine,double>(*p,7,rate);
         compare<Air4Engine,float>(*p,8,rate); compare<Air4Engine,double>(*p,8,rate);
+        compare<BiquadHiLoEngine,float>(*p,9,rate); compare<BiquadHiLoEngine,double>(*p,9,rate);
+        compare<BiquadStackEngine,float>(*p,10,rate); compare<BiquadStackEngine,double>(*p,10,rate);
+        compare<BiquadNonLinEngine,float>(*p,11,rate); compare<BiquadNonLinEngine,double>(*p,11,rate);
+
 
     }
     meterChecks(); trimChecks();
     UI ui(*p);
-    for(int model:{0,1,2,3,4,5,6,7,8,0}) {
+    for(int model:{0,1,2,3,4,5,6,7,8,9,10,11,0}) {
         ui.selectModel(model);
         require(close(parameter(*p,"model").convertFrom0to1(parameter(*p,"model").getValue()),model),"Selector not bound");
         int visible=0;

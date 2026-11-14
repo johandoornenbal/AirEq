@@ -9,6 +9,10 @@
 #include "../Source/EverySlewEngine.h"
 #include "../Source/Slew4Engine.h"
 #include "../Source/Air4Engine.h"
+#include "../Source/BiquadHiLoEngine.h"
+#include "../Source/BiquadStackEngine.h"
+#include "../Source/BiquadNonLinEngine.h"
+
 
 #include "../Source/LoudnessMatch.h"
 #include <iostream>
@@ -153,6 +157,13 @@ int main() try {
     learn<EverySlewEngine>(*p,ui,6);
     learn<Slew4Engine>(*p,ui,7);
     learn<Air4Engine>(*p,ui,8);
+    learn<BiquadHiLoEngine>(*p,ui,9);
+    param(*p,controls::id(10,1)).setValueNotifyingHost(.65f);
+    learn<BiquadStackEngine>(*p,ui,10);
+    param(*p,controls::id(11,0)).setValueNotifyingHost(0.f);
+    param(*p,controls::id(11,2)).setValueNotifyingHost(.3f);
+    learn<BiquadNonLinEngine>(*p,ui,11);
+
 
     in.setValueNotifyingHost(in.getDefaultValue()); out.setValueNotifyingHost(out.getDefaultValue());
     const auto learned=snapshot(*p);
@@ -175,6 +186,10 @@ int main() try {
     verifyAppliedAfterSwitch<EverySlewEngine>(*p,6);
     verifyAppliedAfterSwitch<Slew4Engine>(*p,7);
     verifyAppliedAfterSwitch<Air4Engine>(*p,8);
+    verifyAppliedAfterSwitch<BiquadHiLoEngine>(*p,9);
+    verifyAppliedAfterSwitch<BiquadStackEngine>(*p,10);
+    verifyAppliedAfterSwitch<BiquadNonLinEngine>(*p,11);
+
 
     p->releaseResources();
     for(int model=0;model<controls::modelCount;++model) { original<float>(*p,model); original<double>(*p,model); }
@@ -182,7 +197,7 @@ int main() try {
         param(*p,controls::originalId(model)).setValueNotifyingHost(model%2?1.f:0.f);
         param(*p,controls::matchId(model)).setValueNotifyingHost(model%2?0.f:1.f);
     }
-    for(int model:{0,1,2,3,4,5,6,7,8,0,1}) {
+    for(int model:{0,1,2,3,4,5,6,7,8,9,10,11,0,1}) {
         ui.select(model);
         check(dynamic_cast<juce::TextButton&>(ui.component("matchEnabled")).getToggleState()==(model%2==0),"Model match enable not recalled");
         check(dynamic_cast<juce::TextButton&>(ui.component("abOriginal")).getToggleState()==(model%2==1),"Model A/B not recalled");
@@ -197,11 +212,30 @@ int main() try {
         check(param(*restored,controls::originalId(model)).getValue()==param(*p,controls::originalId(model)).getValue(),"Session lost A/B");
         check(param(*restored,controls::matchId(model)).getValue()==param(*p,controls::matchId(model)).getValue(),"Session lost match enable");
     }
+    // Nine-model sessions keep every old bank and initialize the new filters.
+    auto nine=learned.createCopy();
+    for(int i=nine.getNumChildren();--i>=0;) {
+        const auto id=nine.getChild(i).getProperty("id").toString();
+        if(id.startsWith("biquad")) nine.removeChild(i,nullptr);
+    }
+    for(int model=9;model<controls::modelCount;++model)
+        for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) nine.removeProperty(key(model,property),nullptr);
+    nine.getChildWithProperty("id","model").setProperty("value",8,nullptr);
+    restore(*restored,nine);
+    check(param(*restored,"model").convertFrom0to1(param(*restored,"model").getValue())==8,"Nine-model session lost selection");
+    for(int model=0;model<9;++model) {
+        for(int i=0;i<controls::count(model);++i) check(param(*restored,controls::id(model,i)).getValue()==param(*p,controls::id(model,i)).getValue(),"Nine-model session lost controls");
+        check(snapshot(*restored).getProperty(key(model,"matchDb"))==learned.getProperty(key(model,"matchDb")),"Nine-model session lost match");
+    }
+    for(int model=9;model<controls::modelCount;++model) {
+        for(int i=0;i<controls::count(model);++i) check(std::abs(param(*restored,controls::id(model,i)).getValue()-controls::defaultValue(model,i))<1.e-6,"New Biquad default incorrect");
+        check(!static_cast<bool>(snapshot(*restored).getProperty(key(model,"hasMatch"))),"Old session invented Biquad match");
+    }
     // Loading an eight-model session preserves all old banks and initializes Air4.
     auto eight=learned.createCopy();
     for(int i=eight.getNumChildren();--i>=0;)
-        if(eight.getChild(i).getProperty("id").toString().startsWith("air4_")) eight.removeChild(i,nullptr);
-    for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) eight.removeProperty(key(8,property),nullptr);
+        if(eight.getChild(i).getProperty("id").toString().startsWith("air4_") || eight.getChild(i).getProperty("id").toString().startsWith("biquad")) eight.removeChild(i,nullptr);
+    for(int model=8;model<controls::modelCount;++model) for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) eight.removeProperty(key(model,property),nullptr);
     eight.getChildWithProperty("id","model").setProperty("value",7,nullptr);
     restore(*restored,eight);
     check(std::abs(param(*restored,"model").convertFrom0to1(param(*restored,"model").getValue())-7.f)<1.e-6,"Eight-model session lost Slew4 selection");
@@ -214,7 +248,7 @@ int main() try {
     auto previous=learned.createCopy();
     for(int i=previous.getNumChildren();--i>=0;) {
         const auto id=previous.getChild(i).getProperty("id").toString();
-        if(id.startsWith("everyslew_") || id.startsWith("slew4_") || id.startsWith("air4_")) previous.removeChild(i,nullptr);
+        if(id.startsWith("everyslew_") || id.startsWith("slew4_") || id.startsWith("air4_") || id.startsWith("biquad")) previous.removeChild(i,nullptr);
     }
     for(int model=6;model<controls::modelCount;++model) for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) previous.removeProperty(key(model,property),nullptr);
     previous.getChildWithProperty("id","model").setProperty("value",5,nullptr);
