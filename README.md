@@ -100,6 +100,18 @@ reported to the host. The other models report zero fixed latency. Slew4 also
 retains its original signal-dependent averaging response; that is part of its
 processing, not an extra fixed wrapper delay.
 
+## Optional frequency spectrum
+
+The interface opens with the stereo meters and **Spectrum OFF**. Click **Spectrum ON** to replace the meters with two overlaid traces: gold is the raw stereo input before trims/EQ, and teal is the processed signal immediately after LUFS compensation (including the output trim). The traces stay independent of the Original/Processed A/B switch. No reference plugin or routing is needed. Closing the editor disables capture; reopening returns to the meters.
+
+The analyser is 364 pixels tall at 100% scale, twice the meter panel height. In analyser mode, descriptive text gives way to the controls below the graph. Models with a second frequency-control row expand the window vertically to keep every control at its usual size. The default meter layout stays unchanged.
+
+The display uses a 4096-point Hann-window FFT, logarithmic 20 Hz–20 kHz frequency axis (limited by Nyquist), dBFS peak amplitude and stereo power averaging, so opposite-phase channels do not cancel. FFT and drawing run on the UI thread; bounded read-only audio taps drop frames when the display falls behind. No engine, gain, latency or A/B processing changes. Host bypass stops analysis and the traces decay.
+
+![Default meters](docs/ui-meters.png)
+
+![Optional spectrum analyser](docs/ui-spectrum.png)
+
 ## LUFS comparison and level matching
 
 Play a representative section and click **Learn Match**. It measures the original
@@ -204,7 +216,7 @@ controls, trim linking and host gestures, session/size recall, metering and actu
 editor rendering. Matching tests exercise learning, automatic completion,
 compensation placement, relearning, exact dry A/B, model isolation, session recall,
 reset, cancellation, bypass and silent input. Editor checks write preview PNGs
-for all twelve models in all three sizes to the build directory.
+for all twelve models in all three sizes to the build directory. Spectrum checks also cover calibrated stereo power, idle decay, queue saturation, pre-trim input and post-compensation/pre-A/B routing, exact unchanged float/double output across all twelve algorithms, and both meter/spectrum previews.
 
 ## Licenses
 
@@ -214,7 +226,7 @@ See [THIRD_PARTY.md](THIRD_PARTY.md) for source pins and attribution.
 
 ## Validation in this development instance
 
-Linux Release VST3 compilation passed, with all fifteen CTest suites passing.
+Linux Release VST3 compilation passed, with all sixteen CTest suites passing.
 All twelve engines passed 96 exact upstream comparisons each (1,152 total, maximum
 absolute error 0). LUFS analysis matched independent libebur128 results at
 44.1/48/96/192 kHz. All twelve editors rendered at all three sizes; the images above

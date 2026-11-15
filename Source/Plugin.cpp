@@ -19,6 +19,7 @@
 #include "MeterBallistics.h"
 #include "GainLinkAttachment.h"
 #include "EQLevelMatch.h"
+#include "SpectrumDisplay.h"
 
 class EQProcessor final : public juce::AudioProcessor, private juce::Timer {
 public:
@@ -76,6 +77,7 @@ public:
     }
     int selectedModel() const { return juce::jlimit(0,controls::modelCount-1,juce::roundToInt(modelValue->load())); }
     void prepareToPlay(double rate,int maximumBlockSize) override {
+        spectrumFeed.prepare(rate);
         sampleRate=rate; engine.reset(rate); engine1.reset(rate);
         engine2.reset(rate); engine3.reset(rate); engine4.reset(rate); engine5.reset(rate); engine6.reset(rate); engine7.reset(rate); engine8.reset(rate); engine9.reset(rate); engine10.reset(rate); engine11.reset(rate);
         dryFloat.setSize(2,juce::jmax(1,maximumBlockSize)); dryDouble.setSize(2,juce::jmax(1,maximumBlockSize));
@@ -95,6 +97,8 @@ public:
         for(int i=0;i<controls::count(model);++i) e.setParameter(i,values[static_cast<size_t>(model)][static_cast<size_t>(i)]->load());
         // Scratch storage preserves dry input without allocating on the audio thread.
         // Measure the original input and unmatched EQ output, then apply a separate gain.
+        const bool analyse=spectrumActive.load(std::memory_order_relaxed);
+        spectrumFeed.setActive(analyse);
         std::array<T,256> stackL{},stackR{};
         // Biquads interpolate coefficients over each engine call. Preserve the
         // host block boundary using scratch storage allocated in prepareToPlay.
@@ -133,6 +137,10 @@ public:
                 const auto aligned=alignedDry(dryL[dryIndex],dryR[dryIndex],controls::latency(model));
                 const auto alignedL=aligned[0],alignedR=aligned[1];
                 const auto gain=gainSmooth.getNextValue(),blend=blendSmooth.getNextValue();
+                // Read-only tap: raw input versus wet output immediately after
+                // LUFS gain, independent of the Original/Processed A/B blend.
+                if(analyse) spectrumFeed.push(static_cast<float>(dryL[dryIndex]),static_cast<float>(dryR[dryIndex]),
+                    static_cast<float>(left[i]*gain),static_cast<float>(right[i]*gain),true);
                 if(blend<=0) { left[i]=static_cast<T>(alignedL); right[i]=static_cast<T>(alignedR); }
                 else if(blend>=1) {
                     if(gain<1 || gain>1) { left[i]=static_cast<T>(left[i]*gain); right[i]=static_cast<T>(right[i]*gain); }
@@ -267,6 +275,8 @@ public:
     std::atomic<float> progress{0};
     std::atomic<int> command{0};
     std::atomic<uint32_t> matchRevision{0};
+    SpectrumFeed spectrumFeed;
+    std::atomic<bool> spectrumActive{false};
     std::atomic<int> uiSize{2};
     juce::AudioProcessorValueTreeState state;
     std::atomic<float> peaks[2]{};
@@ -394,7 +404,7 @@ public:
 
 class EQPanel final : public juce::Component, private juce::Timer {
 public:
-    explicit EQPanel(EQProcessor& p) : processor(p) {
+    explicit EQPanel(EQProcessor& p) : processor(p), spectrum(p.spectrumFeed) {
         setLookAndFeel(&look);
         for(size_t i=0;i<knobs.size();++i) {
             auto& slider=knobs[i]; addAndMakeVisible(slider);
@@ -467,6 +477,19 @@ public:
         addAndMakeVisible(reset);
         reset.setColour(juce::TextButton::buttonColourId,style::ink);
         reset.setColour(juce::TextButton::textColourOffId,style::gold);
+        addChildComponent(spectrum);
+        addAndMakeVisible(spectrumToggle); spectrumToggle.setComponentID("showSpectrum");
+        spectrumToggle.setButtonText("Spectrum OFF"); spectrumToggle.setClickingTogglesState(true);
+        spectrumToggle.setColour(juce::TextButton::buttonColourId,style::ink);
+        spectrumToggle.setColour(juce::TextButton::textColourOffId,style::gold);
+        spectrumToggle.setTooltip("Show input and post-LUFS-compensation spectra instead of the meters. Display only; audio processing is unchanged.");
+        spectrumToggle.onClick=[this] {
+            const bool active=spectrumToggle.getToggleState();
+            spectrum.clear(); processor.spectrumActive.store(active,std::memory_order_relaxed);
+            spectrum.setVisible(active); leftMeter.setVisible(!active); rightMeter.setVisible(!active);
+            spectrumToggle.setButtonText(active?"Spectrum ON":"Spectrum OFF"); resized();
+            if(sizeChanged) sizeChanged(); repaint();
+        };
         addAndMakeVisible(leftMeter); addAndMakeVisible(rightMeter);
         lastMeterSequence=processor.meterSequence.load(std::memory_order_acquire);
         for(int c=0;c<2;++c) {
@@ -492,38 +515,45 @@ public:
         };
         setSize(980,830); startTimerHz(60);
     }
-    ~EQPanel() override { stopTimer(); setLookAndFeel(nullptr); }
+    ~EQPanel() override { processor.spectrumActive=false; stopTimer(); setLookAndFeel(nullptr); }
     std::function<void()> sizeChanged;
+    int logicalHeight() const { return 830+(spectrum.isVisible() && controls::hasFrequencies(shownModel)?182:0); }
     void resized() override {
+        spectrumToggle.setBounds(570,10,150,26);
+        const int shift=spectrum.isVisible()?182:0;
+        const int extra=logicalHeight()-830;
+        spectrum.setBounds(48,139,884,364);
         sizeChoice.setBounds(750,10,180,26);
         const auto columns=controls::primaryCount(shownModel);
         const auto spacing=columns>4?884/columns:190;
         const auto width=columns>4?spacing-6:174;
         const auto start=(980-(columns-1)*spacing-width)/2;
-        for(int j=0;j<columns;++j) knobs[static_cast<size_t>(controls::primaryIndex(shownModel,j))].setBounds(start+j*spacing,383,width,150);
+        for(int j=0;j<columns;++j) knobs[static_cast<size_t>(controls::primaryIndex(shownModel,j))].setBounds(start+j*spacing,383+shift,width,150);
         if(controls::hasFrequencies(shownModel))
-            for(int j=0;j<4;++j) knobs[static_cast<size_t>(7-j)].setBounds(118+j*190,560,174,140);
-        inputSlider.setBounds(110,327,270,26); outputSlider.setBounds(665,327,267,26);
+            for(int j=0;j<4;++j) knobs[static_cast<size_t>(7-j)].setBounds(118+j*190,560+shift,174,140);
+        inputSlider.setBounds(110,327+shift,270,26); outputSlider.setBounds(665,327+shift,267,26);
         leftMeter.setBounds(48,139,365,182);
         rightMeter.setBounds(567,139,365,182);
-        linkToggle.setBounds(400,327,180,26);
+        linkToggle.setBounds(400,327+shift,180,26);
         selector.setBounds(540,42,180,30);
         reset.setBounds(750,42,180,30);
-        learnButton.setBounds(48,729,140,28); resetMatchButton.setBounds(200,729,110,28);
-        enableMatchButton.setBounds(322,729,110,28); originalButton.setBounds(444,729,140,28);
-        matchReadout.setBounds(602,729,330,28); matchStatus.setBounds(48,764,884,20);
+        learnButton.setBounds(48,729+extra,140,28); resetMatchButton.setBounds(200,729+extra,110,28);
+        enableMatchButton.setBounds(322,729+extra,110,28); originalButton.setBounds(444,729+extra,140,28);
+        matchReadout.setBounds(602,729+extra,330,28); matchStatus.setBounds(48,764+extra,884,20);
     }
     void paint(juce::Graphics& g) override {
         using namespace style;
+        const int shift=spectrum.isVisible()?182:0;
+        const int extra=logicalHeight()-830;
         g.fillAll(cream);
         g.setColour(ink); g.setFont(juce::FontOptions(11.f));
-        g.drawText("YODO AUDIO    /    AIRWINDOWS DSP",32,17,650,20,juce::Justification::left);
+        g.drawText("YODO AUDIO    /    AIRWINDOWS DSP",32,17,520,20,juce::Justification::left);
         g.setFont(juce::FontOptions(40.f)); g.drawText("AirEq",30,40,240,55,juce::Justification::left);
         g.setFont(juce::FontOptions(13.f)); g.drawText("S T U D I O   /   E Q",248,61,300,20,juce::Justification::left);
         g.setGradientFill(juce::ColourGradient(juce::Colour(0xff343d36),0,108,juce::Colour(0xff1b2420),0,790,false));
-        g.fillRoundedRectangle(16,108,948,680,16);
-        g.setColour(gold.withAlpha(.2f)); g.drawRoundedRectangle({17.f,109.f,946.f,678.f},15,1);
-        for(float x:{30.f,950.f}) for(float y:{122.f,774.f}) {
+        g.fillRoundedRectangle(16,108,948,680+extra,16);
+        g.setColour(gold.withAlpha(.2f)); g.drawRoundedRectangle({17.f,109.f,946.f,678.f+static_cast<float>(extra)},15,1);
+        for(float x:{30.f,950.f}) for(float y:{122.f,774.f+static_cast<float>(extra)}) {
             g.setColour(juce::Colour(0xff111a15)); g.fillEllipse(x-4,y-4,8,8);
             g.setColour(juce::Colour(0xff646c5b)); g.drawLine(x-2,y+1,x+2,y-1,1);
         }
@@ -536,21 +566,21 @@ public:
         g.drawText("STEREO",426,256,128,18,juce::Justification::centred);
         g.drawText("SAMPLE PEAK",426,275,128,18,juce::Justification::centred);
         g.setColour(gold); g.setFont(juce::FontOptions(10.f));
-        g.drawText("INPUT",48,327,62,26,juce::Justification::left);
-        g.drawText("OUTPUT",600,327,65,26,juce::Justification::left);
-        g.setColour(cream.withAlpha(.12f)); g.drawHorizontalLine(362,48,932);
-        g.drawHorizontalLine(713,48,932);
+        g.drawText("INPUT",48,327+shift,62,26,juce::Justification::left);
+        g.drawText("OUTPUT",600,327+shift,65,26,juce::Justification::left);
+        g.setColour(cream.withAlpha(.12f)); g.drawHorizontalLine(362+shift,48,932);
+        g.drawHorizontalLine(713+extra,48,932);
         const auto columns=controls::primaryCount(shownModel);
         const auto spacing=columns>4?884/columns:190;
         const auto width=columns>4?spacing-6:174;
         const auto start=(980-(columns-1)*spacing-width)/2;
         g.setColour(gold); g.setFont(juce::FontOptions(11.f));
-        for(int j=0;j<columns;++j) g.drawText(juce::String(controls::name(shownModel,controls::primaryIndex(shownModel,j))).toUpperCase(),start+j*spacing,367,width,22,juce::Justification::centred);
+        for(int j=0;j<columns;++j) g.drawText(juce::String(controls::name(shownModel,controls::primaryIndex(shownModel,j))).toUpperCase(),start+j*spacing,367+shift,width,22,juce::Justification::centred);
         if(controls::hasFrequencies(shownModel)) {
-            g.setColour(cream.withAlpha(.12f)); g.drawHorizontalLine(542,118,862);
+            g.setColour(cream.withAlpha(.12f)); g.drawHorizontalLine(542+shift,118,862);
             g.setColour(gold);
-            for(int j=0;j<4;++j) g.drawText("FREQUENCY",118+j*190,544,174,22,juce::Justification::centred);
-        } else {
+            for(int j=0;j<4;++j) g.drawText("FREQUENCY",118+j*190,544+shift,174,22,juce::Justification::centred);
+        } else if(!spectrum.isVisible()) {
             g.setColour(cream.withAlpha(.1f)); g.drawHorizontalLine(555,138,842);
             g.setColour(gold); g.setFont(juce::FontOptions(16.f));
             g.drawText(controls::description(shownModel),100,580,780,28,juce::Justification::centred);
@@ -568,8 +598,8 @@ public:
                 "50% is neutral  /  Double-click to reset  /  Type values below each dial",100,647,780,24,juce::Justification::centred);
         }
         g.setColour(ink.withAlpha(.65f)); g.setFont(juce::FontOptions(11.f));
-        g.drawText(controls::modelName(shownModel)+" by Airwindows  /  Independent studio edition",32,796,710,24,juce::Justification::left);
-        g.drawText("STEREO  /  FLOAT / DOUBLE",700,796,248,24,juce::Justification::right);
+        g.drawText(controls::modelName(shownModel)+" by Airwindows  /  Independent studio edition",32,796+extra,710,24,juce::Justification::left);
+        g.drawText("STEREO  /  FLOAT / DOUBLE",700,796+extra,248,24,juce::Justification::right);
     }
 private:
     void bindModel(int model) {
@@ -597,6 +627,7 @@ private:
         enableMatchAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.state,controls::matchId(model),enableMatchButton);
         originalAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.state,controls::originalId(model),originalButton);
         refreshMatch(); resized(); repaint();
+        if(sizeChanged) sizeChanged();
     }
     void refreshMatch() {
         const auto& match=processor.matches[static_cast<size_t>(shownModel)];
@@ -630,6 +661,7 @@ private:
         refreshMatch();
         const auto now=juce::Time::getMillisecondCounterHiRes();
         const auto elapsed=(now-lastMeterTime)*.001;
+        if(spectrum.isVisible()) spectrum.update(elapsed);
         lastMeterTime=now;
         const auto sequence=processor.meterSequence.load(std::memory_order_acquire);
         if(sequence!=lastMeterSequence) {
@@ -645,6 +677,8 @@ private:
     }
     OutputMeter leftMeter{"LEFT"},rightMeter{"RIGHT"};
     EQProcessor& processor;
+    SpectrumDisplay spectrum;
+    juce::TextButton spectrumToggle;
     style::Look look;
     std::array<juce::Slider,8> knobs;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>,8> attachments;
@@ -677,8 +711,8 @@ private:
     void applySize() {
         const float scale=processor.uiSize.load()==1?.75f:processor.uiSize.load()==3?1.25f:1.f;
         panel.setTransform(juce::AffineTransform::scale(scale));
-        panel.setBounds(0,0,980,830);
-        setSize(juce::roundToInt(980*scale),juce::roundToInt(830*scale));
+        panel.setBounds(0,0,980,panel.logicalHeight());
+        setSize(juce::roundToInt(980*scale),juce::roundToInt(panel.logicalHeight()*scale));
     }
     EQProcessor& processor;
     EQPanel panel;

@@ -73,10 +73,10 @@ target_sources(AirEqStudio PRIVATE Source/Plugin.cpp)
 target_compile_definitions(AirEqStudio PUBLIC
   JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0
   JUCE_DISPLAY_SPLASH_SCREEN=0)
-target_link_libraries(AirEqStudio PRIVATE eq_engine juce::juce_audio_utils
+target_link_libraries(AirEqStudio PRIVATE eq_engine juce::juce_audio_utils juce::juce_dsp
   PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 if(BUILD_TESTING)
-  foreach(test IN ITEMS PluginChecks LevelMatchChecks)
+  foreach(test IN ITEMS PluginChecks LevelMatchChecks SpectrumChecks)
     add_executable(${test} tests/${test}.cpp)
     target_include_directories(${test} PRIVATE "${JUCE_MODULES_DIR}")
     target_compile_definitions(${test} PRIVATE JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1)
