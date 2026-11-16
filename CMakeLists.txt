@@ -13,7 +13,7 @@ project(AirEqStudio VERSION 0.5.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(CTest)
-add_library(eq_engine Source/PearLiteEQEngine.cpp Source/BezEQ3Engine.cpp
+add_library(eq_engine Source/FastDistanceEngine.cpp Source/PearLiteEQEngine.cpp Source/BezEQ3Engine.cpp
   Source/FatEQEngine.cpp Source/SmoothEQ3Engine.cpp Source/SmoothEQ2Engine.cpp Source/PearEQEngine.cpp
   Source/EverySlewEngine.cpp Source/Slew4Engine.cpp Source/Air4Engine.cpp Source/BiquadHiLoEngine.cpp Source/BiquadStackEngine.cpp Source/BiquadNonLinEngine.cpp)
 set_target_properties(eq_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -22,7 +22,7 @@ if(MSVC)
   target_compile_definitions(eq_engine PUBLIC _USE_MATH_DEFINES)
 endif()
 if(BUILD_TESTING)
-  foreach(model IN ITEMS PearLiteEQ BezEQ3 FatEQ SmoothEQ3 SmoothEQ2 PearEQ EverySlew Slew4 Air4)
+  foreach(model IN ITEMS FastDistance PearLiteEQ BezEQ3 FatEQ SmoothEQ3 SmoothEQ2 PearEQ EverySlew Slew4 Air4)
     add_executable(reference_${model} tests/Reference${model}.cpp)
     target_include_directories(reference_${model} PRIVATE tests/shim)
     target_link_libraries(reference_${model} PRIVATE eq_engine)

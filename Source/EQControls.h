@@ -1,12 +1,12 @@
 #pragma once
 #include <array>
 namespace controls {
-constexpr int modelCount=12;
-constexpr std::array<const char*,modelCount> models{"PearLiteEQ","BezEQ3","FatEQ","SmoothEQ3","SmoothEQ2","PearEQ","EverySlew","Slew4","Air4","BiquadHiLo","BiquadStack","BiquadNonLin"};
+constexpr int modelCount=13;
+constexpr std::array<const char*,modelCount> models{"PearLiteEQ","BezEQ3","FatEQ","SmoothEQ3","SmoothEQ2","PearEQ","EverySlew","Slew4","Air4","BiquadHiLo","BiquadStack","BiquadNonLin","FastDistance"};
 constexpr std::array<const char*,8> names{"High","High mid","Low mid","Bass","High frequency","High mid frequency","Low mid frequency","Bass frequency"};
 inline juce::String modelName(int model) { return models[static_cast<size_t>(model)]; }
-inline int count(int model) { constexpr std::array<int,modelCount> counts{4,8,5,3,8,6,4,1,4,2,3,5}; return counts[static_cast<size_t>(model)]; }
-inline juce::String prefix(int model) { constexpr std::array<const char*,modelCount> prefixes{"pear_","bez_","fat_","smooth3_","smooth2_","peareq_","everyslew_","slew4_","air4_","biquadhilo_","biquadstack_","biquadnonlin_"}; return prefixes[static_cast<size_t>(model)]; }
+inline int count(int model) { constexpr std::array<int,modelCount> counts{4,8,5,3,8,6,4,1,4,2,3,5,1}; return counts[static_cast<size_t>(model)]; }
+inline juce::String prefix(int model) { constexpr std::array<const char*,modelCount> prefixes{"pear_","bez_","fat_","smooth3_","smooth2_","peareq_","everyslew_","slew4_","air4_","biquadhilo_","biquadstack_","biquadnonlin_","fastdistance_"}; return prefixes[static_cast<size_t>(model)]; }
 inline juce::String id(int model,int index) { return prefix(model)+juce::String(index); }
 inline juce::String matchId(int model) { return prefix(model)+"matchEnabled"; }
 inline juce::String originalId(int model) { return prefix(model)+"original"; }
@@ -16,10 +16,11 @@ inline juce::String linkId(int model) { return prefix(model)+"linkIO"; }
 inline bool hasFrequencies(int model) { return model==1 || model==4; }
 inline int primaryCount(int model) { return hasFrequencies(model)?4:count(model); }
 inline int primaryIndex(int model,int column) { return model>=6?column:model==2?(column==4?4:3-column):primaryCount(model)-1-column; }
-inline float defaultValue(int model,int index) { if(model==9) return 0.f; if(model==10) return .5f; if(model==11) { constexpr std::array<float,5> defaults{0.f,.5f,.7071f,0.f,1.f}; return defaults[static_cast<size_t>(index)]; } if(model==8) { constexpr std::array<float,4> defaults{.5f,.5f,.52f,0.f}; return defaults[static_cast<size_t>(index)]; } if(model==6) { constexpr std::array<float,4> defaults{0.f,1.f,.16f,1.f}; return defaults[static_cast<size_t>(index)]; } return model==2 && index==4?1.f:.5f; }
+inline float defaultValue(int model,int index) { if(model==12) return 0.f; if(model==9) return 0.f; if(model==10) return .5f; if(model==11) { constexpr std::array<float,5> defaults{0.f,.5f,.7071f,0.f,1.f}; return defaults[static_cast<size_t>(index)]; } if(model==8) { constexpr std::array<float,4> defaults{.5f,.5f,.52f,0.f}; return defaults[static_cast<size_t>(index)]; } if(model==6) { constexpr std::array<float,4> defaults{0.f,1.f,.16f,1.f}; return defaults[static_cast<size_t>(index)]; } return model==2 && index==4?1.f:.5f; }
 inline int latency(int model) { return model==2?1:model==7?2:0; }
 inline juce::StringArray choices() { juce::StringArray result; for(auto* name:models) result.add(name); return result; }
 inline const char* name(int model,int index) {
+    if(model==12) return "Distnce";
     if(model==9) { constexpr std::array<const char*,2> n{"Highpas","Lowpass"}; return n[static_cast<size_t>(index)]; }
     if(model==10) { constexpr std::array<const char*,3> n{"Freq","Level","Reso"}; return n[static_cast<size_t>(index)]; }
     if(model==11) { constexpr std::array<const char*,5> n{"Type","Freq","Q","NonLin","Inv/Wet"}; return n[static_cast<size_t>(index)]; }
@@ -38,10 +39,11 @@ inline const char* description(int model) {
         "SMOOTH EQ 2  /  FOUR-BAND EQUALIZER", "PEAR FILTER  /  SIX-BAND EQUALIZER",
         "EVERYSLEW  /  MULTISTAGE SLEW LIMITER", "SLEW4  /  ADAPTIVE SLEW PROCESSOR", "AIR4  /  AIR + GROUND WITH SINEW",
         "BIQUAD HILO  /  HIGH-PASS + LOW-PASS", "BIQUAD STACK  /  STACKED FILTER",
-        "BIQUAD NONLIN  /  NONLINEAR FILTER"};
+        "BIQUAD NONLIN  /  NONLINEAR FILTER", "FASTDISTANCE  /  DISTANCE PROCESSOR"};
     return text[static_cast<size_t>(model)];
 }
 inline juce::String tip(int model,int index) {
+    if(model==12) return "Original Airwindows distance mapping. Default 0%; normalized control, not meters or milliseconds.";
     if(model==9) return "Original normalized high-pass/low-pass mapping. Both default to 0%; not a Hz readout.";
     if(model==10) return index==0?"Original normalized frequency mapping, not a Hz readout. Default 50%.":
         index==1?"Original bipolar filter level. Default 50% (zero contribution).":"Original resonance mapping. Default 50%.";

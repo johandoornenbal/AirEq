@@ -11,6 +11,7 @@
 #include "EverySlewEngine.h"
 #include "Slew4Engine.h"
 #include "Air4Engine.h"
+#include "FastDistanceEngine.h"
 #include "BiquadHiLoEngine.h"
 #include "BiquadStackEngine.h"
 #include "BiquadNonLinEngine.h"
@@ -79,7 +80,7 @@ public:
     void prepareToPlay(double rate,int maximumBlockSize) override {
         spectrumFeed.prepare(rate);
         sampleRate=rate; engine.reset(rate); engine1.reset(rate);
-        engine2.reset(rate); engine3.reset(rate); engine4.reset(rate); engine5.reset(rate); engine6.reset(rate); engine7.reset(rate); engine8.reset(rate); engine9.reset(rate); engine10.reset(rate); engine11.reset(rate);
+        engine2.reset(rate); engine3.reset(rate); engine4.reset(rate); engine5.reset(rate); engine6.reset(rate); engine7.reset(rate); engine8.reset(rate); engine9.reset(rate); engine10.reset(rate); engine11.reset(rate); engine12.reset(rate);
         dryFloat.setSize(2,juce::jmax(1,maximumBlockSize)); dryDouble.setSize(2,juce::jmax(1,maximumBlockSize));
         dryHistory={};
         activeModel=selectedModel(); setLatencySamples(controls::latency(activeModel)); peaks[0]=0; peaks[1]=0;
@@ -176,6 +177,7 @@ public:
             case 9: render(engine9,b,model); break;
             case 10: render(engine10,b,model); break;
             case 11: render(engine11,b,model); break;
+            case 12: render(engine12,b,model); break;
             default: break;
         }
         publishMeters(b);
@@ -300,6 +302,7 @@ private:
                 case 9: engine9.reset(sampleRate); break;
                 case 10: engine10.reset(sampleRate); break;
                 case 11: engine11.reset(sampleRate); break;
+                case 12: engine12.reset(sampleRate); break;
                 default: break;
             }
             setLatencySamples(controls::latency(model));
@@ -350,6 +353,7 @@ private:
     PearEQEngine engine5;
     EverySlewEngine engine6;
     Slew4Engine engine7;
+    FastDistanceEngine engine12;
     Air4Engine engine8;
     BiquadHiLoEngine engine9;
     BiquadStackEngine engine10;
@@ -585,7 +589,8 @@ public:
             g.setColour(gold); g.setFont(juce::FontOptions(16.f));
             g.drawText(controls::description(shownModel),100,580,780,28,juce::Justification::centred);
             g.setColour(cream.withAlpha(.65f)); g.setFont(juce::FontOptions(13.f));
-            g.drawText(shownModel>=9?"Original Airwindows biquad filtering and parameter mappings.":
+            g.drawText(shownModel==12?"Original Airwindows distance filtering and sample-rate handling.":
+                shownModel>=9?"Original Airwindows biquad filtering and parameter mappings.":
                 shownModel==6?"Original multistage limiting with halo and inverse/dry/wet blend.":
                 shownModel==8?"Original Air/Gnd voicing and Sinew dynamics.":
                 shownModel==7?"Original adaptive averaging and two-sample lookahead.":

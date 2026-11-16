@@ -1,7 +1,7 @@
 # AirEq Studio
 
 A native studio UI for **Airwindows PearLiteEQ, BezEQ3, FatEQ, SmoothEQ3,
-SmoothEQ2, PearEQ, EverySlew, Slew4, Air4, BiquadHiLo, BiquadStack and BiquadNonLin**, using the cream,
+SmoothEQ2, PearEQ, EverySlew, Slew4, Air4, BiquadHiLo, BiquadStack, BiquadNonLin and FastDistance**, using the cream,
 charcoal and brass style of [ToTape Studio](https://github.com/johandoornenbal/tape).
 **PearLiteEQ is the default.** Built with JUCE as a **VST3 for Apple Silicon Macs
 (M2 and later)**, macOS 11+. Independent adaptation; original DSP by Chris Johnson / Airwindows.
@@ -35,6 +35,12 @@ The controls follow each original plugin, displayed from low to high bands:
 | BiquadHiLo | Highpas, Lowpass | 0%, 0% |
 | BiquadStack | Freq, Level, Reso | 50%, 50%, 50% |
 | BiquadNonLin | Type, Freq, Q, NonLin, Inv/Wet | 0%, 50%, 70.71%, 0%, 100% |
+| FastDistance | Distnce | 0% |
+
+FastDistance retains its original distance filtering and sample-rate handling.
+Distnce uses the native continuous 0–1 mapping, displayed as a percentage; it is
+not a distance in meters or a delay time. Its wrapper trims, linking, LUFS match,
+A/B, reset and session recall follow the other models.
 
 The three Biquad additions retain the original normalized controls, including
 coefficient interpolation across each host audio block (up to its advertised
@@ -70,7 +76,7 @@ while keeping that lookahead. Slew4's 50% default is not a neutral EQ setting.
 [FatEQ](docs/ui-fateq.png) · [SmoothEQ3](docs/ui-smootheq3.png) ·
 [SmoothEQ2](docs/ui-smootheq2.png) · [PearEQ](docs/ui-peareq.png) ·
 [EverySlew](docs/ui-everyslew.png) · [Slew4](docs/ui-slew4.png) · [Air4](docs/ui-air4.png) · [BiquadHiLo](docs/ui-biquadhilo.png) ·
-[BiquadStack](docs/ui-biquadstack.png) · [BiquadNonLin](docs/ui-biquadnonlin.png)
+[BiquadStack](docs/ui-biquadstack.png) · [BiquadNonLin](docs/ui-biquadnonlin.png) · [FastDistance](docs/ui-fastdistance.png)
 
 Double-click a knob to reset it, or type a value below it. **Reset to Default**
 resets only the selected model's original controls and input/output trims.
@@ -144,10 +150,10 @@ Processed. Matching defaults enabled but applies unity until a match is learned.
 
 ## Existing sessions
 
-All 89 host parameter IDs and indices from the nine-model v0.4 release are
+All 114 host parameter IDs and indices from the twelve-model v0.5 release are
 preserved, including the original 23 from v0.1. Existing model selection,
-controls, trims and learned matches are retained; the new banks receive the
-upstream defaults. The selector now has twelve choices, so existing host
+controls, trims and learned matches are retained; the new bank receives the
+upstream defaults. The selector now has thirteen choices, so existing host
 automation for that selector may need updating to its expanded range. Other
 parameters keep their original ranges and indices. Switch algorithms with
 playback stopped so the host can update FatEQ/Slew4 latency compensation.
@@ -210,13 +216,13 @@ are for development validation; releases target Apple Silicon Macs.
 Upstream comparison tests cover both precisions, silence, extremes, sample rates
 44.1–192 kHz, parameter changes and variable block sizes with matched noise seeds.
 Loudness tests compare the analyser with independent libebur128 results.
-Wrapper tests cover default model, routing, model-specific latency, all twelve
+Wrapper tests cover default model, routing, model-specific latency, all thirteen
 model banks, typed/reset
 controls, trim linking and host gestures, session/size recall, metering and actual
 editor rendering. Matching tests exercise learning, automatic completion,
 compensation placement, relearning, exact dry A/B, model isolation, session recall,
 reset, cancellation, bypass and silent input. Editor checks write preview PNGs
-for all twelve models in all three sizes to the build directory. Spectrum checks also cover calibrated stereo power, idle decay, queue saturation, pre-trim input and post-compensation/pre-A/B routing, exact unchanged float/double output across all twelve algorithms, and both meter/spectrum previews.
+for all thirteen models in all three sizes to the build directory. Spectrum checks also cover calibrated stereo power, idle decay, queue saturation, pre-trim input and post-compensation/pre-A/B routing, exact unchanged float/double output across all thirteen algorithms, and both meter/spectrum previews.
 
 ## Licenses
 
@@ -226,10 +232,10 @@ See [THIRD_PARTY.md](THIRD_PARTY.md) for source pins and attribution.
 
 ## Validation in this development instance
 
-Linux Release VST3 compilation passed, with all sixteen CTest suites passing.
-All twelve engines passed 96 exact upstream comparisons each (1,152 total, maximum
+Linux Release VST3 compilation passed, with all seventeen CTest suites passing.
+All thirteen engines passed 96 exact upstream comparisons each (1,248 total, maximum
 absolute error 0). LUFS analysis matched independent libebur128 results at
-44.1/48/96/192 kHz. All twelve editors rendered at all three sizes; the images above
+44.1/48/96/192 kHz. All thirteen editors rendered at all three sizes; the images above
 come from the actual plugin editor at the upstream default settings.
 
 The unchanged Mac installer previously passed shell syntax checks and simulated

@@ -85,3 +85,16 @@ those calls into 256-sample pieces; oversized host blocks are processed in bound
 pieces without allocating in the audio callback. The three models have no added
 fixed latency. Existing host parameter indices and IDs are retained; new banks
 are appended. Matching and trims remain wrapper features outside the DSP.
+
+## Airwindows FastDistance
+
+Chris Johnson / Airwindows, MIT. Retrieved November 16, 2026 from commit
+`143a86df3642881e0be4bf827815050721063b41`:
+https://github.com/airwindows/airwindows/tree/143a86df3642881e0be4bf827815050721063b41/plugins/WinVST/FastDistance
+
+The three original files are preserved verbatim under
+`third_party/airwindows/FastDistance`. `scripts/port-fastdistance.py` reproduces
+the SDK-free adapter, retaining the original initialization, parameter default,
+float/double processing bodies and the project's established fixed dither seeds.
+Reference tests match those seeds and verify exact float/double output across
+44.1–192 kHz, parameter extremes, automation, variable blocks, silence and reset.

@@ -9,6 +9,7 @@
 #include "../Source/EverySlewEngine.h"
 #include "../Source/Slew4Engine.h"
 #include "../Source/Air4Engine.h"
+#include "../Source/FastDistanceEngine.h"
 #include "../Source/BiquadHiLoEngine.h"
 #include "../Source/BiquadStackEngine.h"
 #include "../Source/BiquadNonLinEngine.h"
@@ -157,6 +158,7 @@ int main() try {
     learn<EverySlewEngine>(*p,ui,6);
     learn<Slew4Engine>(*p,ui,7);
     learn<Air4Engine>(*p,ui,8);
+    learn<FastDistanceEngine>(*p,ui,12);
     learn<BiquadHiLoEngine>(*p,ui,9);
     param(*p,controls::id(10,1)).setValueNotifyingHost(.65f);
     learn<BiquadStackEngine>(*p,ui,10);
@@ -186,6 +188,7 @@ int main() try {
     verifyAppliedAfterSwitch<EverySlewEngine>(*p,6);
     verifyAppliedAfterSwitch<Slew4Engine>(*p,7);
     verifyAppliedAfterSwitch<Air4Engine>(*p,8);
+    verifyAppliedAfterSwitch<FastDistanceEngine>(*p,12);
     verifyAppliedAfterSwitch<BiquadHiLoEngine>(*p,9);
     verifyAppliedAfterSwitch<BiquadStackEngine>(*p,10);
     verifyAppliedAfterSwitch<BiquadNonLinEngine>(*p,11);
@@ -197,7 +200,7 @@ int main() try {
         param(*p,controls::originalId(model)).setValueNotifyingHost(model%2?1.f:0.f);
         param(*p,controls::matchId(model)).setValueNotifyingHost(model%2?0.f:1.f);
     }
-    for(int model:{0,1,2,3,4,5,6,7,8,9,10,11,0,1}) {
+    for(int model:{0,1,2,3,4,5,6,7,8,9,10,11,12,0,1}) {
         ui.select(model);
         check(dynamic_cast<juce::TextButton&>(ui.component("matchEnabled")).getToggleState()==(model%2==0),"Model match enable not recalled");
         check(dynamic_cast<juce::TextButton&>(ui.component("abOriginal")).getToggleState()==(model%2==1),"Model A/B not recalled");
@@ -212,11 +215,21 @@ int main() try {
         check(param(*restored,controls::originalId(model)).getValue()==param(*p,controls::originalId(model)).getValue(),"Session lost A/B");
         check(param(*restored,controls::matchId(model)).getValue()==param(*p,controls::matchId(model)).getValue(),"Session lost match enable");
     }
+    // The previous twelve-model release has no FastDistance bank.
+    auto twelve=learned.createCopy();
+    for(int i=twelve.getNumChildren();--i>=0;)
+        if(twelve.getChild(i).getProperty("id").toString().startsWith("fastdistance_")) twelve.removeChild(i,nullptr);
+    for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) twelve.removeProperty(key(12,property),nullptr);
+    twelve.getChildWithProperty("id","model").setProperty("value",11,nullptr);
+    restore(*restored,twelve);
+    check(param(*restored,"model").convertFrom0to1(param(*restored,"model").getValue())==11,"Twelve-model selection lost");
+    check(param(*restored,controls::id(12,0)).getValue()==0.f,"Twelve-model session lost FastDistance default");
+    check(!static_cast<bool>(snapshot(*restored).getProperty(key(12,"hasMatch"))),"Old session invented FastDistance match");
     // Nine-model sessions keep every old bank and initialize the new filters.
     auto nine=learned.createCopy();
     for(int i=nine.getNumChildren();--i>=0;) {
         const auto id=nine.getChild(i).getProperty("id").toString();
-        if(id.startsWith("biquad")) nine.removeChild(i,nullptr);
+        if(id.startsWith("biquad") || id.startsWith("fastdistance_")) nine.removeChild(i,nullptr);
     }
     for(int model=9;model<controls::modelCount;++model)
         for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) nine.removeProperty(key(model,property),nullptr);
@@ -234,7 +247,7 @@ int main() try {
     // Loading an eight-model session preserves all old banks and initializes Air4.
     auto eight=learned.createCopy();
     for(int i=eight.getNumChildren();--i>=0;)
-        if(eight.getChild(i).getProperty("id").toString().startsWith("air4_") || eight.getChild(i).getProperty("id").toString().startsWith("biquad")) eight.removeChild(i,nullptr);
+        if(eight.getChild(i).getProperty("id").toString().startsWith("air4_") || eight.getChild(i).getProperty("id").toString().startsWith("biquad") || eight.getChild(i).getProperty("id").toString().startsWith("fastdistance_")) eight.removeChild(i,nullptr);
     for(int model=8;model<controls::modelCount;++model) for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) eight.removeProperty(key(model,property),nullptr);
     eight.getChildWithProperty("id","model").setProperty("value",7,nullptr);
     restore(*restored,eight);
@@ -248,7 +261,7 @@ int main() try {
     auto previous=learned.createCopy();
     for(int i=previous.getNumChildren();--i>=0;) {
         const auto id=previous.getChild(i).getProperty("id").toString();
-        if(id.startsWith("everyslew_") || id.startsWith("slew4_") || id.startsWith("air4_") || id.startsWith("biquad")) previous.removeChild(i,nullptr);
+        if(id.startsWith("everyslew_") || id.startsWith("slew4_") || id.startsWith("air4_") || id.startsWith("biquad") || id.startsWith("fastdistance_")) previous.removeChild(i,nullptr);
     }
     for(int model=6;model<controls::modelCount;++model) for(const char* property:{"matchDb","hasMatch","inputLufs","outputLufs"}) previous.removeProperty(key(model,property),nullptr);
     previous.getChildWithProperty("id","model").setProperty("value",5,nullptr);
